@@ -269,8 +269,8 @@ pub fn geometries_to_feature_collection(
 /// (`[west, south, east, north]`). Positions nest arbitrarily deep — a
 /// MultiPolygon is a Vec<Vec<Vec<Position>>> — so recurse rather than
 /// match each geometry type.
-fn extend_bounds(value: &geojson::Value, bounds: &mut Option<[f64; 4]>) {
-    use geojson::Value::*;
+fn extend_bounds(value: &geojson::GeometryValue, bounds: &mut Option<[f64; 4]>) {
+    use geojson::GeometryValue::*;
 
     let mut add = |p: &geojson::Position| {
         if p.len() < 2 {
@@ -284,11 +284,13 @@ fn extend_bounds(value: &geojson::Value, bounds: &mut Option<[f64; 4]>) {
     };
 
     match value {
-        Point(p) => add(p),
-        MultiPoint(ps) | LineString(ps) => ps.iter().for_each(add),
-        MultiLineString(lss) | Polygon(lss) => lss.iter().flatten().for_each(add),
-        MultiPolygon(ps) => ps.iter().flatten().flatten().for_each(add),
-        GeometryCollection(gs) => {
+        Point { coordinates: p } => add(p),
+        MultiPoint { coordinates: ps } | LineString { coordinates: ps } => ps.iter().for_each(add),
+        MultiLineString { coordinates: lss } | Polygon { coordinates: lss } => {
+            lss.iter().flatten().for_each(add)
+        }
+        MultiPolygon { coordinates: ps } => ps.iter().flatten().flatten().for_each(add),
+        GeometryCollection { geometries: gs } => {
             for g in gs {
                 extend_bounds(&g.value, bounds);
             }
@@ -656,7 +658,7 @@ mod tests {
         let fc = parse_to_feature_collection("POINT(1 2)").unwrap();
         assert_eq!(fc.features.len(), 1);
         let geom = fc.features[0].geometry.as_ref().unwrap();
-        assert!(matches!(geom.value, geojson::Value::Point(_)));
+        assert!(matches!(geom.value, geojson::GeometryValue::Point { .. }));
     }
 
     #[test]
@@ -668,7 +670,7 @@ mod tests {
         assert_eq!(fc.features.len(), 1);
         assert!(matches!(
             fc.features[0].geometry.as_ref().unwrap().value,
-            geojson::Value::Polygon(_)
+            geojson::GeometryValue::Polygon { .. }
         ));
     }
 
@@ -728,7 +730,7 @@ mod tests {
                 .unwrap();
         let out = transform_feature_collection(fc, 27700, 4258).unwrap();
         match &out.features[0].geometry.as_ref().unwrap().value {
-            geojson::Value::Point(c) => {
+            geojson::GeometryValue::Point { coordinates: c } => {
                 assert!((c[0] - (-6.29977752)).abs() < 1e-6, "lon: {}", c[0]);
                 assert!((c[1] - 49.92226394).abs() < 1e-6, "lat: {}", c[1]);
             }
@@ -816,7 +818,7 @@ mod tests {
         assert_eq!(fc.features.len(), 3);
         assert!(matches!(
             fc.features[2].geometry.as_ref().unwrap().value,
-            geojson::Value::Polygon(_)
+            geojson::GeometryValue::Polygon { .. }
         ));
     }
 
