@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    font-family: theme("fontFamily.sans");
+  }
+  body {
+    @apply bg-neutral-100 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100;
+  }
+  geocow-app {
+    display: block;
+    position: relative;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+  }
+}
+
+/* Kept OUTSIDE @layer base on purpose. MapLibre adds
+   `.maplibregl-map { position: relative }` to #map from an *unlayered*
+   stylesheet, and unlayered rules beat any @layer rule regardless of
+   specificity — so a layered #map rule loses and the container collapses to
+   height 0. Unlayered + an ID selector wins, pinning the map to fill the app. */
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Custom elements default to display:inline and shrink-wrap their content,
+   which made the paste box jump width with its text. Block-level hosts give
+   them a stable, container-driven width. */
+geocow-app paste-box,
+geocow-app info-box,
+geocow-app style-controls,
+geocow-app settings-panel {
+  display: block;
+}
+
+/* MapLibre is rendered in light DOM, so its stylesheet (imported in
+   map-view.ts) applies globally. A couple of overrides to match theme. */
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}

@@ -1,0 +1,33 @@
+services:
+  geocow:
+    build: .
+    image: geocow:latest
+    container_name: geocow
+    restart: unless-stopped
+
+    # Publish ONLY to the host loopback. Docker writes its own iptables rules
+    # that bypass host firewalls, so a bare "8787:8787" would expose the
+    # service on every interface. Binding to 127.0.0.1 keeps it private; put a
+    # reverse proxy in front (see deploy/).
+    ports:
+      - "127.0.0.1:8787:8787"
+
+    environment:
+      # The container listens on all interfaces *inside* its network namespace;
+      # the loopback restriction is enforced by the host port mapping above.
+      GEOCOW_BIND: "0.0.0.0:8787"
+      # Optional — everything works without these. Set them in a .env file
+      # next to this one (gitignored) or in your shell.
+      GEOCOW_API_KEY: ${GEOCOW_API_KEY:-}                       # enables POST /api/geometry
+      GEOCOW_PUBLIC_URL: ${GEOCOW_PUBLIC_URL:-}                 # origin for returned links
+      GEOCOW_MAPTILER_KEY: ${GEOCOW_MAPTILER_KEY:-}             # MapTiler styles + satellite
+      GEOCOW_AERIAL_TILE_URL: ${GEOCOW_AERIAL_TILE_URL:-}       # hi-res aerial overlay (XYZ)
+      GEOCOW_AERIAL_ATTRIBUTION: ${GEOCOW_AERIAL_ATTRIBUTION:-}
+    # The OSTN15 grid is baked into the image (see Dockerfile) — no volume.
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8787/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

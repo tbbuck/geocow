@@ -1,0 +1,36 @@
+# Rust
+/target/
+**/*.rs.bk
+# Cargo.lock IS committed — geocow ships binaries (server, launch) and the
+# Docker build needs it for reproducible builds.
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+
+# OSTN15 grid files — large binaries, obtain from Ordnance Survey
+# Test data and headers ARE committed (small, essential for TDD)
+OSTN15_NTv2/*.gsb
+OSTN15_NTv2/*.asc
+# ...except the one grid we actually use (15 MB): committed so the Docker
+# build can bake it in — no runtime volume to wrangle.
+!OSTN15_NTv2/OSTN15_NTv2_OSGBtoETRS.gsb
+
+# Environment
+.env
+
+# Local agent tooling — per-machine, never published
+.claude/
+claude-scripts/
+claude-sql/

@@ -1,0 +1,60 @@
+[package]
+name = "geocow"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "High-precision ETRS89 <-> British National Grid (OSTN15) transforms: CLI, HTTP API and web map"
+authors = ["Thomas Buck"]
+license = "MIT"
+repository = "https://github.com/tbbuck/geocow"
+homepage = "https://geocow.uk"
+readme = "README.md"
+keywords = ["gis", "ostn15", "osgb", "proj", "national-grid"]
+categories = ["science::geo", "command-line-utilities", "web-programming::http-server"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+geo = "0.29"
+geojson = "0.24"
+proj = "0.28"
+thiserror = "2"
+wkt = { version = "0.11", features = ["geo-types"] }
+
+# `geocow serve`: web server
+axum = { version = "0.8", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"], optional = true }
+tower-http = { version = "0.6", features = ["fs", "trace"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+
+# Share-link codec, for `geocow map` and the server's stored shares
+flate2 = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[features]
+# Both subcommands by default; `--no-default-features` builds a lean
+# `geocow transform`-only CLI with no async runtime.
+default = ["serve", "map"]
+serve = [
+    "dep:axum",
+    "dep:tokio",
+    "dep:tower-http",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:uuid",
+    # POSTed geometry is stored as a share payload, so the server needs the
+    # same gzip+base64url codec `geocow map` uses.
+    "dep:flate2",
+    "dep:base64",
+]
+map = ["dep:flate2", "dep:base64"]

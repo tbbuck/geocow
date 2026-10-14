@@ -1,0 +1,59 @@
+# geocow behind nginx — an example reverse proxy.
+#
+#   client ──► (optional CDN/TLS edge) ──► nginx (this) ──► 127.0.0.1:8787 (container)
+#
+# Install: copy to /etc/nginx/sites-available/geocow.conf, set server_name,
+# symlink into sites-enabled/, `nginx -t`, then `systemctl reload nginx`.
+# For TLS on this box, add `listen 443 ssl` + certificates (e.g. certbot).
+
+# Keepalive pool to the container — avoids a new TCP handshake per request.
+upstream geocow {
+    server 127.0.0.1:8787;
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name maps.example.com;
+
+    # Behind Cloudflare? Uncomment for real client IPs in the logs.
+    # include /etc/nginx/snippets/cloudflare-realip.conf;
+
+    # geocow accepts geometry bodies up to 256 MiB; this is the proxy's cap.
+    # Raise it if you POST large datasets to /api/geometry.
+    client_max_body_size 25m;
+
+    # Compress the JS/CSS bundle (~1 MB) and API JSON.
+    gzip on;
+    gzip_types application/javascript application/json text/css image/svg+xml;
+    gzip_min_length 1024;
+
+    # Hashed Vite assets are immutable — cache them hard.
+    location /assets/ {
+        proxy_pass http://geocow;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # API and the SPA shell — never cache (so deploys show up immediately).
+    # Host and X-Forwarded-Proto matter: /api/geometry builds the links it
+    # returns from them (or set GEOCOW_PUBLIC_URL).
+    location / {
+        proxy_pass http://geocow;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        # Behind a TLS-terminating edge such as Cloudflare Flexible, use
+        # $http_x_forwarded_proto instead so links come back as https.
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP         $remote_addr;
+        add_header Cache-Control "no-store";
+    }
+}

@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust
+    # 24.04 ships PROJ 9.4, the minimum proj-sys links against.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install PROJ
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libproj-dev pkg-config
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      # Includes all 40 OS reference points in both directions.
+      - run: cargo test --all-features --locked
+      - name: Lean build (transform only)
+        run: cargo build --no-default-features --locked
+
+  web:
+    name: Web
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn build
+      - run: yarn test
+
+  # Optional: tell a deployment repo that main is green. Off unless the
+  # DEPLOY_REPO variable (owner/name) and DEPLOY_DISPATCH_TOKEN secret are set,
+  # so forks are unaffected. Never runs for pull requests.
+  dispatch-deploy:
+    name: Dispatch deploy
+    needs: [rust, web]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_REPO != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - run: gh api "repos/${{ vars.DEPLOY_REPO }}/dispatches" -f event_type=deploy -f "client_payload[sha]=${{ github.sha }}"
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}

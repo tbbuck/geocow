@@ -1,0 +1,21 @@
+# Build artifacts and deps — rebuilt inside the image
+target/
+web/node_modules/
+web/dist/
+
+# Grid binaries: bake in only the one we use; keep the obsolete grid and the
+# huge .asc text equivalents out of the build context.
+OSTN15_NTv2/*.gsb
+OSTN15_NTv2/*.asc
+!OSTN15_NTv2/OSTN15_NTv2_OSGBtoETRS.gsb
+
+# VCS / local
+.git/
+.github/
+.claude/
+claude-scripts/
+claude-sql/
+.env
+*.md
+# ...except the grid's licence, which must travel with the baked-in grid.
+!OSTN15_NTv2/LICENCE.md
