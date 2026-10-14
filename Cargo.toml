@@ -17,7 +17,9 @@ anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 geo = "0.32"
 geojson = "1.0"
-proj = "0.31"
+# Held at 0.28: newer proj-sys needs PROJ >= 9.6.2, but the Docker base
+# (Debian trixie) ships 9.6.0, which would force a from-source PROJ build.
+proj = "0.28"
 thiserror = "2"
 wkt = { version = "0.14", features = ["geo-types"] }
 
