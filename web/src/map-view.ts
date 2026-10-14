@@ -1,8 +1,11 @@
-import maplibregl, {
-  type GeoJSONSource,
-  type MapMouseEvent,
-  type FilterSpecification,
-} from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import type { GeoJSONSource, MapMouseEvent, FilterSpecification } from "maplibre-gl";
+// MapLibre 6 looks for its worker beside its own module file, which doesn't
+// exist once Vite has bundled it; ship the (self-contained) worker as an
+// asset and say where it is.
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Feature, FeatureCollection } from "geojson";
 
