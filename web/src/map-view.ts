@@ -341,14 +341,18 @@ export class MapView {
 
   /** Highlight layers: one feature (the selection) drawn vividly on top. Paint
    * starts invisible and is animated by the rAF loop. `*-transition: 0` so our
-   * per-frame constants apply immediately rather than double-easing. */
+   * per-frame constants apply immediately rather than double-easing.
+   *
+   * A theme swap rebuilds these mid-selection, so they start out pointing at
+   * whatever is still selected. */
   private installHighlightLayers(): void {
+    const fid = this.selectedFid ?? NO_SELECTION;
     if (!this.map.getLayer(FILL_HI_LAYER)) {
       this.map.addLayer({
         id: FILL_HI_LAYER,
         type: "fill",
         source: GEOM_SOURCE,
-        filter: hiFilter(POLY_TYPES, NO_SELECTION),
+        filter: hiFilter(POLY_TYPES, fid),
         paint: {
           "fill-opacity": 0,
           "fill-opacity-transition": { duration: 0 },
@@ -360,7 +364,7 @@ export class MapView {
         id: LINE_HI_LAYER,
         type: "line",
         source: GEOM_SOURCE,
-        filter: hiFilter(LINE_TYPES, NO_SELECTION),
+        filter: hiFilter(LINE_TYPES, fid),
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
           "line-width": DEFAULT_LOOK.lineWidth,
@@ -375,7 +379,7 @@ export class MapView {
         id: CIRCLE_HI_LAYER,
         type: "circle",
         source: GEOM_SOURCE,
-        filter: hiFilter(POINT_TYPES, NO_SELECTION),
+        filter: hiFilter(POINT_TYPES, fid),
         paint: {
           "circle-radius": DEFAULT_LOOK.circleRadius,
           "circle-opacity": 0,
@@ -393,7 +397,7 @@ export class MapView {
         id: SYMBOL_HI_LAYER,
         type: "symbol",
         source: GEOM_SOURCE,
-        filter: withSymbol(hiFilter(POINT_TYPES, NO_SELECTION)),
+        filter: withSymbol(hiFilter(POINT_TYPES, fid)),
         layout: { "icon-allow-overlap": true, "icon-ignore-placement": true },
         paint: {
           "icon-opacity": 0,
