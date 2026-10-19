@@ -3,6 +3,7 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import { LightElement } from "./lit-base";
 import { formatArea, formatLength, type FeatureSummary } from "./geo";
+import { featureText } from "./simplestyle";
 
 @customElement("info-box")
 export class InfoBox extends LightElement {
@@ -84,14 +85,18 @@ export class InfoBox extends LightElement {
   render() {
     if (!this.summary) return nothing;
     const s = this.summary;
+    // A simplestyle title takes the heading, and the geometry type its label.
+    const { title, description } = featureText(s.properties);
     return html`
       <div
         class="pointer-events-auto w-72 rounded-xl bg-white/95 p-4 shadow-xl backdrop-blur dark:bg-neutral-900/95"
       >
-        <div class="flex items-start justify-between">
-          <div>
-            <div class="text-xs uppercase tracking-wide text-neutral-500">Geometry</div>
-            <div class="text-lg font-semibold">${s.type}</div>
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="text-xs uppercase tracking-wide text-neutral-500">
+              ${title ? s.type : "Geometry"}
+            </div>
+            <div class="break-words text-lg font-semibold">${title ?? s.type}</div>
           </div>
           <button
             @click=${this.close}
@@ -101,6 +106,12 @@ export class InfoBox extends LightElement {
             ✕
           </button>
         </div>
+        ${description
+          ? // Inline on purpose: pre-line would render the template's newlines.
+            html`<p
+              class="mt-1 max-h-32 overflow-y-auto overscroll-contain whitespace-pre-line break-words text-sm text-neutral-800 dark:text-neutral-100"
+            >${description}</p>`
+          : nothing}
         <div class="mt-1 text-sm text-neutral-600 dark:text-neutral-300">
           ${s.vertices} vertices
         </div>

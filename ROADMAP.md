@@ -18,7 +18,7 @@ everything before it stays green.
 - **`geocow transform`**, **`geocow serve`** (web map + HTTP API, Docker
   image), **`geocow map`** (pipe to a browser).
 - **The web map.** Forgiving paste, file drop, National Grid detection,
-  data-driven extrusion and colour, share links, a live URL.
+  data-driven extrusion and colour, simplestyle, share links, a live URL.
 
 ## Next
 

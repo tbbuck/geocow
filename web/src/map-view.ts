@@ -11,7 +11,6 @@ import type { Feature, FeatureCollection } from "geojson";
 
 import {
   DEFAULT_VIEW,
-  GEOM_COLOR,
   GEOM_SOURCE,
   aerialInsertBefore,
   resolveStyleUrl,
@@ -30,6 +29,8 @@ import {
   easeOutBack,
   mix,
 } from "./selection";
+import { DEFAULT_LOOK, SS, buildPaint, featureLook, renderProps, type Look } from "./simplestyle";
+import { SYMBOL_PIXEL_RATIO, drawSymbol } from "./symbols";
 import type { EffectiveSettings } from "./settings";
 import type { ViewState } from "./state";
 
@@ -37,11 +38,14 @@ const FILL_LAYER = "geocow-fill";
 const EXTRUDE_LAYER = "geocow-extrude";
 const LINE_LAYER = "geocow-line";
 const CIRCLE_LAYER = "geocow-circle";
+// simplestyle `marker-symbol`s, drawn over their marker circles.
+const SYMBOL_LAYER = "geocow-symbol";
 // Highlight layers render only the selected feature, on top of the (dimmed)
 // base layers, so its constant paint can be animated (data-driven can't be).
 const FILL_HI_LAYER = "geocow-fill-hi";
 const LINE_HI_LAYER = "geocow-line-hi";
 const CIRCLE_HI_LAYER = "geocow-circle-hi";
+const SYMBOL_HI_LAYER = "geocow-symbol-hi";
 // The fill and extrude layers are mutually exclusive (2D vs 3D — see
 // applySettings), so listing both means the polygon *body* is clickable in
 // either mode. Without EXTRUDE_LAYER here, a 3D-extruded polygon only responds
@@ -81,6 +85,11 @@ function hiFilter(types: string[], fid: number): FilterSpecification {
     ["match", ["geometry-type"], types, true, false],
     ["==", ["get", "__fid"], fid],
   ] as FilterSpecification;
+}
+
+/** Narrow a points filter to the points with a symbol to draw. */
+function withSymbol(filter: FilterSpecification): FilterSpecification {
+  return ["all", filter, ["has", SS.symbol]] as FilterSpecification;
 }
 
 const DEFAULT_SETTINGS: EffectiveSettings = {
@@ -137,6 +146,9 @@ export class MapView {
   // __fid of the feature whose info box is open, or null. Drives the focus
   // effect: selected feature vivid, the rest faded.
   private selectedFid: number | null = null;
+  // The selected feature's own widths and opacities, which its highlight
+  // grows from. Kept after deselecting, so the fade-out shrinks to match.
+  private selectedLook: Look = DEFAULT_LOOK;
   // Two tweens animated by rAF: `dim` fades the other features, `hi` pops the
   // selected one. `p` is linear progress [0,1] of the current leg; easing is
   // applied to `p` (not the interpolated value) so reversing starts promptly.
@@ -175,6 +187,10 @@ export class MapView {
       this.installAerialOverlay();
       this.installDataLayers();
     });
+
+    // simplestyle marker symbols are drawn on demand (and again after a
+    // theme swap, which drops every image). MapLibre waits for them.
+    this.map.setMissingStyleImageResolver((id) => this.provideSymbol(id));
 
     // Report the camera while the user is moving it, not only once it
     // settles, so the URL is right if it's copied mid-gesture.
@@ -239,6 +255,23 @@ export class MapView {
     }
   }
 
+  /** MapLibre needs an image it hasn't got: draw it if it's a marker symbol. */
+  private async provideSymbol(id: string): Promise<void> {
+    const drawing = drawSymbol(id);
+    if (!drawing) return; // not one of ours
+    try {
+      const image = await drawing;
+      // Two tiles can ask at once; the first to finish adds it.
+      if (!this.map.hasImage(id)) {
+        this.map.addImage(id, image, { pixelRatio: SYMBOL_PIXEL_RATIO });
+      }
+    } catch (err) {
+      console.warn(`couldn't draw marker symbol ${id}:`, err);
+    }
+  }
+
+  // Colours, widths and radii are data-driven (simplestyle and colour-by),
+  // so applySettings sets them; opacities are animated, so renderFocus does.
   private installDataLayers(): void {
     if (!this.map.getSource(GEOM_SOURCE)) {
       this.map.addSource(GEOM_SOURCE, { type: "geojson", data: this.data });
@@ -249,7 +282,6 @@ export class MapView {
         type: "fill",
         source: GEOM_SOURCE,
         filter: ["match", ["geometry-type"], ["Polygon", "MultiPolygon"], true, false],
-        paint: { "fill-color": GEOM_COLOR, "fill-opacity": 0.25 },
       });
     }
     if (!this.map.getLayer(EXTRUDE_LAYER)) {
@@ -260,7 +292,6 @@ export class MapView {
         filter: ["match", ["geometry-type"], ["Polygon", "MultiPolygon"], true, false],
         layout: { visibility: "none" },
         paint: {
-          "fill-extrusion-color": GEOM_COLOR,
           "fill-extrusion-opacity": 0.85,
           "fill-extrusion-base": 0,
           "fill-extrusion-height": 0,
@@ -280,7 +311,6 @@ export class MapView {
           false,
         ],
         layout: { "line-join": "round", "line-cap": "round" },
-        paint: { "line-color": GEOM_COLOR, "line-width": 2.5, "line-opacity": 0.95 },
       });
     }
     if (!this.map.getLayer(CIRCLE_LAYER)) {
@@ -290,12 +320,19 @@ export class MapView {
         source: GEOM_SOURCE,
         filter: ["match", ["geometry-type"], ["Point", "MultiPoint"], true, false],
         paint: {
-          "circle-radius": 6,
-          "circle-color": GEOM_COLOR,
-          "circle-opacity": 0.9,
           "circle-stroke-width": 2,
           "circle-stroke-color": "#ffffff",
         },
+      });
+    }
+    if (!this.map.getLayer(SYMBOL_LAYER)) {
+      this.map.addLayer({
+        id: SYMBOL_LAYER,
+        type: "symbol",
+        source: GEOM_SOURCE,
+        filter: withSymbol(["match", ["geometry-type"], POINT_TYPES, true, false]),
+        // Every marker gets its symbol, as every marker gets its circle.
+        layout: { "icon-allow-overlap": true, "icon-ignore-placement": true },
       });
     }
     this.installHighlightLayers();
@@ -313,7 +350,6 @@ export class MapView {
         source: GEOM_SOURCE,
         filter: hiFilter(POLY_TYPES, NO_SELECTION),
         paint: {
-          "fill-color": GEOM_COLOR,
           "fill-opacity": 0,
           "fill-opacity-transition": { duration: 0 },
         },
@@ -327,8 +363,7 @@ export class MapView {
         filter: hiFilter(LINE_TYPES, NO_SELECTION),
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
-          "line-color": GEOM_COLOR,
-          "line-width": 2.5,
+          "line-width": DEFAULT_LOOK.lineWidth,
           "line-opacity": 0,
           "line-width-transition": { duration: 0 },
           "line-opacity-transition": { duration: 0 },
@@ -342,8 +377,7 @@ export class MapView {
         source: GEOM_SOURCE,
         filter: hiFilter(POINT_TYPES, NO_SELECTION),
         paint: {
-          "circle-radius": 6,
-          "circle-color": GEOM_COLOR,
+          "circle-radius": DEFAULT_LOOK.circleRadius,
           "circle-opacity": 0,
           "circle-stroke-width": 2,
           "circle-stroke-color": "#ffffff",
@@ -354,31 +388,49 @@ export class MapView {
         },
       });
     }
+    if (!this.map.getLayer(SYMBOL_HI_LAYER)) {
+      this.map.addLayer({
+        id: SYMBOL_HI_LAYER,
+        type: "symbol",
+        source: GEOM_SOURCE,
+        filter: withSymbol(hiFilter(POINT_TYPES, NO_SELECTION)),
+        layout: { "icon-allow-overlap": true, "icon-ignore-placement": true },
+        paint: {
+          "icon-opacity": 0,
+          "icon-opacity-transition": { duration: 0 },
+        },
+      });
+    }
   }
 
-  /** The active geometry colour: a colour-by expression or the flat accent. */
-  private colorExpression(): unknown {
-    const s = this.settings;
-    return s.color
-      ? buildColorExpression(s.colorProp, s.colorMin, s.colorMax, s.colorScheme)
-      : GEOM_COLOR;
-  }
-
-  /** Apply colour-by-value and extrusion settings to the data layers. */
+  /** Apply simplestyle, colour-by-value and extrusion settings to the data layers. */
   private applySettings(): void {
     if (!this.map.getLayer(FILL_LAYER)) return; // layers not installed yet
     const s = this.settings;
 
-    // Colour, shared by the base and highlight layers so a focused feature
-    // keeps its colour-by shade.
-    const colorExpr = this.colorExpression();
-    this.map.setPaintProperty(FILL_LAYER, "fill-color", colorExpr as never);
-    this.map.setPaintProperty(LINE_LAYER, "line-color", colorExpr as never);
-    this.map.setPaintProperty(CIRCLE_LAYER, "circle-color", colorExpr as never);
-    this.map.setPaintProperty(EXTRUDE_LAYER, "fill-extrusion-color", colorExpr as never);
-    this.map.setPaintProperty(FILL_HI_LAYER, "fill-color", colorExpr as never);
-    this.map.setPaintProperty(LINE_HI_LAYER, "line-color", colorExpr as never);
-    this.map.setPaintProperty(CIRCLE_HI_LAYER, "circle-color", colorExpr as never);
+    // Colours, shared by the base and highlight layers so a focused feature
+    // keeps its own (or its colour-by) shade.
+    const ramp = s.color
+      ? buildColorExpression(s.colorProp, s.colorMin, s.colorMax, s.colorScheme)
+      : null;
+    const p = buildPaint(ramp);
+    const paint = (layer: string, prop: keyof maplibregl.AllPaintProperties, value: unknown) =>
+      this.map.setPaintProperty(layer, prop, value as never);
+    paint(FILL_LAYER, "fill-color", p.fillColor);
+    paint(FILL_LAYER, "fill-outline-color", p.fillOutlineColor);
+    paint(LINE_LAYER, "line-color", p.lineColor);
+    paint(LINE_LAYER, "line-width", p.lineWidth);
+    paint(CIRCLE_LAYER, "circle-color", p.circleColor);
+    paint(CIRCLE_LAYER, "circle-radius", p.circleRadius);
+    paint(EXTRUDE_LAYER, "fill-extrusion-color", p.extrudeColor);
+    paint(FILL_HI_LAYER, "fill-color", p.hiFillColor);
+    paint(LINE_HI_LAYER, "line-color", p.hiLineColor);
+    paint(CIRCLE_HI_LAYER, "circle-color", p.hiCircleColor);
+    // The symbol's ink depends on its marker's colour, so this tracks colour-by too.
+    for (const layer of [SYMBOL_LAYER, SYMBOL_HI_LAYER]) {
+      this.map.setLayoutProperty(layer, "icon-image", p.iconImage as never);
+      this.map.setLayoutProperty(layer, "icon-size", p.iconSize as never);
+    }
 
     // Extrusion: height from the chosen property; swap flat fill for 3D. The
     // flat highlight fill hides in 3D too (its outline still reads).
@@ -398,6 +450,7 @@ export class MapView {
     this.map.setFilter(FILL_HI_LAYER, hiFilter(POLY_TYPES, fid));
     this.map.setFilter(LINE_HI_LAYER, hiFilter(LINE_TYPES, fid));
     this.map.setFilter(CIRCLE_HI_LAYER, hiFilter(POINT_TYPES, fid));
+    this.map.setFilter(SYMBOL_HI_LAYER, withSymbol(hiFilter(POINT_TYPES, fid)));
   }
 
   /** Current displayed amount of a tween (eased, for continuity on retarget). */
@@ -418,11 +471,12 @@ export class MapView {
       "circle-stroke-opacity",
       base.circleStrokeOpacity as never,
     );
+    this.map.setPaintProperty(SYMBOL_LAYER, "icon-opacity", base.iconOpacity as never);
 
     // Opacity eases smoothly; size springs (easeOutBack) off the same progress.
     const fade = mix(this.hi.from, this.hi.to, easeOutCubic(this.hi.p));
     const pop = mix(this.hi.from, this.hi.to, easeOutBack(this.hi.p));
-    const hi = highlightPaint(fade, pop);
+    const hi = highlightPaint(fade, pop, this.selectedLook);
     this.map.setPaintProperty(FILL_HI_LAYER, "fill-opacity", hi.fillOpacity as never);
     this.map.setPaintProperty(LINE_HI_LAYER, "line-opacity", hi.lineOpacity as never);
     this.map.setPaintProperty(LINE_HI_LAYER, "line-width", hi.lineWidth as never);
@@ -433,6 +487,7 @@ export class MapView {
       "circle-stroke-opacity",
       hi.circleStrokeOpacity as never,
     );
+    this.map.setPaintProperty(SYMBOL_HI_LAYER, "icon-opacity", hi.iconOpacity as never);
   }
 
   /** Start a new tween leg to `to`, continuing from `from` (default: current
@@ -463,6 +518,7 @@ export class MapView {
     this.selectedFid = fid;
 
     if (fid != null) {
+      this.selectedLook = featureLook(this.data.features[fid]?.properties ?? null);
       this.setHighlightFilters(fid);
       // Fresh selection dims the rest; switching A→B keeps them dimmed. Either
       // way the highlight replays from 0 so the new feature springs in.
@@ -486,6 +542,7 @@ export class MapView {
       this.rafId = null;
     }
     this.selectedFid = null;
+    this.selectedLook = DEFAULT_LOOK;
     this.dim = { from: 0, to: 0, start: 0, dur: DIM_MS, p: 1 };
     this.hi = { from: 0, to: 0, start: 0, dur: HI_MS, p: 1 };
   }
@@ -518,12 +575,13 @@ export class MapView {
   setData(fc: FeatureCollection, fit = true): void {
     this.resetFocus(); // old __fid no longer refers to anything
     this.features = fc.features;
-    // Tag each feature with its index so clicks can recover the original.
+    // Tag each feature with its index so clicks can recover the original, and
+    // with the render properties its simplestyle keys resolve to.
     this.data = {
       type: "FeatureCollection",
       features: fc.features.map((f, i) => ({
         ...f,
-        properties: { ...(f.properties ?? {}), __fid: i },
+        properties: { ...(f.properties ?? {}), ...renderProps(f.properties), __fid: i },
       })),
     };
     const source = this.map.getSource(GEOM_SOURCE) as GeoJSONSource | undefined;

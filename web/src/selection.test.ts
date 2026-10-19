@@ -9,6 +9,7 @@ import {
   basePaint,
   highlightPaint,
 } from "./selection";
+import { DEFAULT_LOOK } from "./simplestyle";
 
 describe("easing helpers", () => {
   it("lerp and clamp01 behave", () => {
@@ -49,19 +50,23 @@ describe("easing helpers", () => {
 
 describe("basePaint (all features dim as `dim` → 1)", () => {
   it("is the normal look at dim=0", () => {
+    // Fill and line opacity multiply the alpha baked into each feature's
+    // colour, so at rest they leave it untouched.
     expect(basePaint(0)).toEqual({
-      fillOpacity: 0.25,
-      lineOpacity: 0.95,
+      fillOpacity: 1,
+      lineOpacity: 1,
       circleOpacity: 0.9,
       circleStrokeOpacity: 1,
+      iconOpacity: 1,
     });
   });
 
-  it("fades everything toward faint at dim=1", () => {
+  it("fades an unstyled feature to the same faint shade as ever at dim=1", () => {
     const p = basePaint(1);
-    expect(p.fillOpacity).toBeCloseTo(0.06);
-    expect(p.lineOpacity).toBeCloseTo(0.18);
-    expect(p.fillOpacity).toBeLessThan(basePaint(0).fillOpacity);
+    expect(DEFAULT_LOOK.fillOpacity * p.fillOpacity).toBeCloseTo(0.06);
+    expect(DEFAULT_LOOK.lineOpacity * p.lineOpacity).toBeCloseTo(0.18);
+    expect(p.circleOpacity).toBeCloseTo(0.2);
+    expect(p.iconOpacity).toBeLessThan(basePaint(0).iconOpacity);
   });
 });
 
@@ -71,6 +76,7 @@ describe("highlightPaint (selected feature only)", () => {
     expect(p.fillOpacity).toBe(0);
     expect(p.lineOpacity).toBe(0);
     expect(p.circleOpacity).toBe(0);
+    expect(p.iconOpacity).toBe(0);
   });
 
   it("reaches full vividness at fade=pop=1", () => {
@@ -79,11 +85,35 @@ describe("highlightPaint (selected feature only)", () => {
     expect(p.lineOpacity).toBe(1);
     expect(p.lineWidth).toBeCloseTo(4.5);
     expect(p.circleRadius).toBeCloseTo(9);
+    expect(p.iconOpacity).toBe(1);
   });
 
   it("lets size overshoot when pop > 1 (spring past target)", () => {
     const p = highlightPaint(1, 1.05);
     expect(p.lineWidth).toBeGreaterThan(4.5);
     expect(p.circleRadius).toBeGreaterThan(9);
+  });
+
+  it("grows from the selected feature's own look", () => {
+    const look = { fillOpacity: 0.1, lineOpacity: 0.5, lineWidth: 6, circleRadius: 11 };
+    expect(highlightPaint(1, 0, look).lineWidth).toBe(6);
+    const p = highlightPaint(1, 1, look);
+    expect(p.lineWidth).toBeCloseTo(8);
+    expect(p.circleRadius).toBeCloseTo(16.5);
+    expect(p.fillOpacity).toBeCloseTo(0.24);
+    expect(p.lineOpacity).toBe(1);
+  });
+
+  it("keeps an invisible fill or stroke invisible", () => {
+    const look = { fillOpacity: 0, lineOpacity: 0, lineWidth: 0, circleRadius: 6 };
+    const p = highlightPaint(1, 1, look);
+    expect(p.fillOpacity).toBe(0);
+    expect(p.lineOpacity).toBe(0);
+    expect(p.lineWidth).toBe(0);
+  });
+
+  it("never fills the selection solid", () => {
+    const look = { ...DEFAULT_LOOK, fillOpacity: 0.6 };
+    expect(highlightPaint(1, 1, look).fillOpacity).toBeLessThan(1);
   });
 });

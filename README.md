@@ -162,6 +162,13 @@ MapLibre GL + Lit + Tailwind, served by `geocow serve`.
 - **Style by your data** — extrude polygons by a numeric property, colour
   through viridis, magma, inferno, plasma or cividis. Both switch on by
   themselves when the property is present.
+- **simplestyle** — features carrying
+  [simplestyle-spec 1.1.0](https://github.com/mapbox/simplestyle-spec/tree/master/1.1.0)
+  properties (`stroke`, `fill`, `marker-color`, `marker-size`,
+  `marker-symbol` and the rest) draw as styled, with a Maki icon, letter or
+  digit on the marker, and their `title` and `description` head the panel.
+  geocow adds `fill-outline-color`, a 1px hairline round the fill that shows
+  where the stroke is off. A colour a feature sets beats colour-by.
 - **Click a feature** to focus it: the rest fades back, and a panel shows its
   type, vertex count, bounding box, approximate area/length and properties.
 - **Light, dark and satellite**, following `prefers-color-scheme` unless you

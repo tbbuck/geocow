@@ -78,6 +78,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@mapbox/maki@npm:^8.2.0":
+  version: 8.2.0
+  resolution: "@mapbox/maki@npm:8.2.0"
+  checksum: 10c0/199695b8b074b7eb35dd1b8f6f9c1bf8fc2df5d77570fde598d8ac16e01a33df52bc196cbffcce20dd635539fdfc7ae6e9134916c105f57d513230b14d66452b
+  languageName: node
+  linkType: hard
+
 "@mapbox/point-geometry@npm:^1.1.0, @mapbox/point-geometry@npm:~1.1.0":
   version: 1.1.0
   resolution: "@mapbox/point-geometry@npm:1.1.0"
@@ -701,6 +708,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "geocow-web@workspace:."
   dependencies:
+    "@mapbox/maki": "npm:^8.2.0"
+    "@maplibre/maplibre-gl-style-spec": "npm:^26.4.4"
     "@types/geojson": "npm:^7946.0.15"
     autoprefixer: "npm:^10.6.1"
     lit: "npm:^3.2.1"
