@@ -51,6 +51,19 @@ export const SCHEMES: { key: ColorScheme; label: string }[] = [
   { key: "dark", label: "Dark" },
 ];
 
+/** A saved scheme, or Auto when there's none or it isn't one we know. */
+export function parseScheme(stored: string | null): ColorScheme {
+  return SCHEMES.find((s) => s.key === stored)?.key ?? "system";
+}
+
+/**
+ * Whether the app's own panels are dark: the scheme picked, or the system's
+ * under Auto. Unlike the basemap, satellite doesn't change it.
+ */
+export function panelsDark(scheme: ColorScheme, prefersDark: boolean): boolean {
+  return scheme === "dark" || (scheme === "system" && prefersDark);
+}
+
 /** Satellite mode needs imagery from somewhere: MapTiler's or the overlay. */
 export function satelliteAvailable(cfg: MapConfig): boolean {
   return cfg.maptilerKey !== null || cfg.aerialTileUrl !== null;

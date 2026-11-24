@@ -1,7 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{ts,js}"],
-  darkMode: "media",
+  // The `dark` class on <html>, set from the Auto/Light/Dark choice (theme.ts).
+  darkMode: "class",
   theme: {
     extend: {
       fontFamily: {

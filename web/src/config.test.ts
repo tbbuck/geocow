@@ -3,11 +3,38 @@ import { describe, it, expect } from "vitest";
 import {
   NO_MAP_CONFIG,
   aerialInsertBefore,
+  panelsDark,
   parseMapConfig,
+  parseScheme,
   resolveStyleUrl,
   satelliteAvailable,
   type MapConfig,
 } from "./config";
+
+describe("panelsDark", () => {
+  it("follows an explicit choice, whatever the system prefers", () => {
+    expect(panelsDark("dark", false)).toBe(true);
+    expect(panelsDark("light", true)).toBe(false);
+  });
+
+  it("follows the system under Auto", () => {
+    expect(panelsDark("system", true)).toBe(true);
+    expect(panelsDark("system", false)).toBe(false);
+  });
+});
+
+describe("parseScheme", () => {
+  it("accepts a saved scheme", () => {
+    expect(parseScheme("dark")).toBe("dark");
+    expect(parseScheme("light")).toBe("light");
+    expect(parseScheme("system")).toBe("system");
+  });
+
+  it("falls back to Auto for anything else", () => {
+    expect(parseScheme(null)).toBe("system");
+    expect(parseScheme("sepia")).toBe("system");
+  });
+});
 
 const KEYED: MapConfig = { ...NO_MAP_CONFIG, maptilerKey: "k" };
 const AERIAL: MapConfig = {

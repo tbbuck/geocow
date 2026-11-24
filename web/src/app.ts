@@ -17,12 +17,12 @@ import { sanitisePaste, looksLineDelimited } from "./sanitise";
 import { NavigationTracker } from "./navigation";
 import {
   NO_MAP_CONFIG,
-  SCHEMES,
   fetchMapConfig,
   satelliteAvailable,
   type ColorScheme,
   type MapConfig,
 } from "./config";
+import { SCHEME_KEY, applyPanelScheme, savedScheme } from "./theme";
 import {
   MAX_INLINE_SHARE_URL,
   compressText,
@@ -58,7 +58,6 @@ import type { StyleState } from "./style-controls";
 import type { ColorByDetail } from "./property-list";
 import type { FeatureCollection } from "geojson";
 
-const SCHEME_KEY = "geocow:scheme";
 const SAT_KEY = "geocow:satellite";
 
 // Above this size, a dropped file is *not* echoed into the paste box or saved
@@ -76,7 +75,9 @@ function formatBytes(n: number): string {
 export class GeocowApp extends LightElement {
   private map!: MapView;
 
-  @state() private scheme: ColorScheme = "system";
+  // Saved scheme from the start, so the style buttons show it from the first
+  // render (main.ts has already applied it to the panels).
+  @state() private scheme: ColorScheme = savedScheme();
   @state() private satellite = false;
   @state() private mapConfig: MapConfig = NO_MAP_CONFIG;
   @state() private inputText = "";
@@ -128,7 +129,6 @@ export class GeocowApp extends LightElement {
       configError = e instanceof Error ? e.message : String(e);
     }
 
-    this.scheme = this.loadScheme();
     this.satellite =
       window.localStorage.getItem(SAT_KEY) === "1" && satelliteAvailable(this.mapConfig);
     const initialView = readView();
@@ -153,9 +153,11 @@ export class GeocowApp extends LightElement {
     window
       .matchMedia("(prefers-color-scheme: dark)")
       .addEventListener("change", () => {
-        if (this.scheme === "system" && !this.satellite) {
-          this.map.setTheme("system", false);
-        }
+        if (this.scheme !== "system") return;
+        // The panels follow the system under Auto even over satellite, which
+        // keeps its own basemap.
+        applyPanelScheme("system");
+        if (!this.satellite) this.map.setTheme("system", false);
       });
 
     // `/` focuses the paste box when nothing editable is focused.
@@ -408,11 +410,6 @@ export class GeocowApp extends LightElement {
     }
   }
 
-  private loadScheme(): ColorScheme {
-    const v = window.localStorage.getItem(SCHEME_KEY) as ColorScheme | null;
-    return v && SCHEMES.some((s) => s.key === v) ? v : "system";
-  }
-
   private setStatus(status: PasteStatus, message = "") {
     this.status = status;
     this.message = message;
@@ -583,6 +580,7 @@ export class GeocowApp extends LightElement {
     this.satellite = e.detail.satellite;
     window.localStorage.setItem(SCHEME_KEY, this.scheme);
     window.localStorage.setItem(SAT_KEY, this.satellite ? "1" : "0");
+    applyPanelScheme(this.scheme);
     this.map.setTheme(this.scheme, this.satellite);
   }
 
