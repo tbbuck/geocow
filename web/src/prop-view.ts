@@ -173,20 +173,27 @@ export function fold(title: string, count: number, preview: string, body: unknow
 /**
  * The switch that shows or hides every context box at once. It lives in the
  * box's header, which never moves: in the list it would ride up as the
- * pinned tiles above it lost their charts.
+ * pinned tiles above it lost their charts. With fewer than two features
+ * there's nothing to compare against, so it shows greyed out, saying why,
+ * rather than vanishing and leaving no clue where it lives.
  */
 export function contextSwitch(on: boolean, total: number, onToggle: () => void) {
+  const available = total >= 2;
   const n = total.toLocaleString();
+  const hint = !available
+    ? "Plot two or more features to compare each value with the rest"
+    : on
+      ? `Hide how each value compares with all ${n} features`
+      : `Show how each value compares with all ${n} features`;
   return html`<button
     type="button"
-    aria-pressed=${on ? "true" : "false"}
-    title=${on
-      ? `Hide how each value compares with all ${n} features`
-      : `Show how each value compares with all ${n} features`}
-    @click=${onToggle}
-    class="flex shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 py-1 text-[12px] font-medium text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 aria-pressed:border-neutral-300 aria-pressed:bg-neutral-100 aria-pressed:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:aria-pressed:border-neutral-600 dark:aria-pressed:bg-neutral-800 dark:aria-pressed:text-neutral-100 ${FOCUS}"
+    aria-pressed=${available && on ? "true" : "false"}
+    aria-disabled=${available ? "false" : "true"}
+    title=${hint}
+    @click=${() => available && onToggle()}
+    class="flex shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 py-1 text-[12px] font-medium text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 aria-pressed:border-neutral-300 aria-pressed:bg-neutral-100 aria-pressed:text-neutral-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-neutral-500 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:aria-pressed:border-neutral-600 dark:aria-pressed:bg-neutral-800 dark:aria-pressed:text-neutral-100 dark:aria-disabled:hover:bg-transparent dark:aria-disabled:hover:text-neutral-400 ${FOCUS}"
   >
-    ${contextIcon(on)} Context
+    ${contextIcon(available && on)} Context
   </button>`;
 }
 

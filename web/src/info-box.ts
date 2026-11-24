@@ -143,7 +143,7 @@ export class InfoBox extends LightElement {
             : nothing}
         </div>
         <div class="-mr-1.5 flex shrink-0 items-center gap-1.5">
-          ${total >= 2 ? contextSwitch(this.showContext, total, this.toggleContext) : nothing}
+          ${contextSwitch(this.showContext, total, this.toggleContext)}
           <button
             type="button"
             @click=${this.close}
