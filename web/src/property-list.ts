@@ -4,22 +4,16 @@
 // sits in the whole collection — a histogram for numbers and dates, a share
 // bar for categories, whether another feature shares an id. What stands out
 // about the feature comes first; properties the same on every feature, or
-// empty on this one, fold away at the end. One switch shows or hides all the
-// context at once, and clicking a number's histogram colours the map by it.
-// Pins and the switch are remembered between sessions.
+// empty on this one, fold away at the end. The Context switch in the box's
+// header shows or hides all the context at once; clicking a number's
+// histogram colours the map by it. Pins are remembered between sessions.
 
 import { html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 import { LightElement } from "./lit-base";
 import type { FeatureSummary } from "./geo";
-import {
-  loadPins,
-  loadShowContext,
-  savePins,
-  saveShowContext,
-  togglePin,
-} from "./inspector-prefs";
+import { loadPins, savePins, togglePin } from "./inspector-prefs";
 import {
   MAX_CATEGORIES,
   collectionSize,
@@ -41,7 +35,6 @@ import {
   FOCUS,
   HAIRLINE,
   MUTED,
-  contextIcon,
   filterInput,
   fold,
   groupHeading,
@@ -57,12 +50,13 @@ import {
 /** Colour the map by `key` over [min, max]; null stops. */
 export type ColorByDetail = { key: string; min: number; max: number } | null;
 
-// With context, keys get a shade more than values: the context column takes
-// its room from both, and long unbroken keys (versionavailablefromdate)
-// should still fit on one line. Without it, values get the room.
+// Long unbroken keys (versionavailablefromdate, 143px) should fit on one
+// line. With context, keys get a shade more than values, since the context
+// column takes its room from both. Without it, values get the extra; the
+// split still leaves keys 151px in the narrower 24rem box.
 const ROW_CONTEXT =
   "group/row grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_5.5rem] items-start gap-x-3 py-1";
-const ROW = "group/row grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-start gap-x-3 py-[3px]";
+const ROW = "group/row grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-start gap-x-3 py-[3px]";
 const HEADING = "pb-1 text-[12px] font-semibold text-neutral-700 dark:text-neutral-200";
 
 const isoDay = (t: number) => new Date(t).toISOString().slice(0, 10);
@@ -76,10 +70,35 @@ export class PropertyList extends LightElement {
   @property({ attribute: false }) stats: Map<string, KeyStats> = new Map();
   /** The property the map is coloured by, if any. */
   @property({ attribute: false }) colorProp: string | null = null;
+  /** Whether the context boxes show (the header's Context switch). */
+  @property({ attribute: false }) showContext = true;
   // Kept across clicks while the box is open: filter once, then click around.
   @state() private filter = "";
   @state() private pins: string[] = loadPins();
-  @state() private showContext = loadShowContext();
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.addEventListener("keydown", this.onKeydown);
+  }
+
+  disconnectedCallback() {
+    this.removeEventListener("keydown", this.onKeydown);
+    super.disconnectedCallback();
+  }
+
+  /**
+   * Escape clears a filter before it closes the box — from anywhere in the
+   * list, not only the field, since pinning a filtered row takes focus from
+   * it — and puts focus back in the field. With no filter it passes on.
+   */
+  private onKeydown = (e: KeyboardEvent) => {
+    if (e.key !== "Escape" || !this.filter) return;
+    e.stopPropagation();
+    this.filter = "";
+    void this.updateComplete.then(() =>
+      this.querySelector<HTMLInputElement>("input[type=search]")?.focus(),
+    );
+  };
 
   render() {
     const props = ownProps(this.summary.properties);
@@ -88,8 +107,7 @@ export class PropertyList extends LightElement {
       return html`<p class="px-4 pb-4 pt-1 text-[13px] ${MUTED}">No properties</p>`;
     }
     const total = collectionSize(this.stats);
-    const comparable = total >= 2;
-    const context = comparable && this.showContext;
+    const context = total >= 2 && this.showContext;
     const shown = keys.filter((k) => matchesFilter(k, props[k], this.filter));
     const { varying, same, empty } = partition(shown, props, this.stats);
     const outs = context
@@ -100,10 +118,9 @@ export class PropertyList extends LightElement {
     return html`
       ${pinned.length ? this.renderPinned(pinned, props, context) : nothing}
       <div
-        class="sticky top-0 z-10 flex items-stretch gap-2 bg-white/95 px-4 pb-2 pt-1 backdrop-blur dark:bg-neutral-900/95"
+        class="sticky top-0 z-10 flex bg-white/95 px-4 pb-2 pt-1 backdrop-blur dark:bg-neutral-900/95"
       >
         ${filterInput(this.filter, keys.length, (q) => (this.filter = q))}
-        ${comparable ? this.contextSwitch(total) : nothing}
       </div>
       ${shown.length === 0 ? noMatch(this.filter) : nothing}
       <div class="px-4 pb-4">
@@ -229,25 +246,6 @@ export class PropertyList extends LightElement {
   }
 
   // --- Context ----------------------------------------------------------------
-
-  private contextSwitch(total: number) {
-    const on = this.showContext;
-    const n = total.toLocaleString();
-    return html`<button
-      type="button"
-      aria-pressed=${on ? "true" : "false"}
-      title=${on
-        ? `Hide how each value compares with all ${n} features`
-        : `Show how each value compares with all ${n} features`}
-      @click=${() => {
-        this.showContext = !on;
-        saveShowContext(this.showContext);
-      }}
-      class="flex shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 text-[12px] font-medium text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 aria-pressed:border-neutral-300 aria-pressed:bg-neutral-100 aria-pressed:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:aria-pressed:border-neutral-600 dark:aria-pressed:bg-neutral-800 dark:aria-pressed:text-neutral-100 ${FOCUS}"
-    >
-      ${contextIcon(on)} Context
-    </button>`;
-  }
 
   private caption(text: string) {
     return html`<span class="mt-0.5 block text-[11px] leading-tight ${MUTED}">${text}</span>`;

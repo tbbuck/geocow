@@ -103,7 +103,7 @@ export function valueButton(
   </button>`;
 }
 
-/** The filter field. Escape clears a filter before it closes the box. */
+/** The filter field. (Escape is handled by the list around it.) */
 export function filterInput(value: string, total: number, onInput: (q: string) => void) {
   return html`<input
     type="search"
@@ -112,14 +112,6 @@ export function filterInput(value: string, total: number, onInput: (q: string) =
     aria-label="Filter properties by key or value"
     spellcheck="false"
     @input=${(e: Event) => onInput((e.target as HTMLInputElement).value)}
-    @keydown=${(e: KeyboardEvent) => {
-      const input = e.target as HTMLInputElement;
-      if (e.key === "Escape" && input.value) {
-        e.stopPropagation();
-        input.value = "";
-        onInput("");
-      }
-    }}
     class="min-w-0 flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-accent focus:ring-1 focus:ring-accent dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100 dark:placeholder:text-neutral-500"
   />`;
 }
@@ -179,10 +171,30 @@ export function fold(title: string, count: number, preview: string, body: unknow
 }
 
 /**
+ * The switch that shows or hides every context box at once. It lives in the
+ * box's header, which never moves: in the list it would ride up as the
+ * pinned tiles above it lost their charts.
+ */
+export function contextSwitch(on: boolean, total: number, onToggle: () => void) {
+  const n = total.toLocaleString();
+  return html`<button
+    type="button"
+    aria-pressed=${on ? "true" : "false"}
+    title=${on
+      ? `Hide how each value compares with all ${n} features`
+      : `Show how each value compares with all ${n} features`}
+    @click=${onToggle}
+    class="flex shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 py-1 text-[12px] font-medium text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 aria-pressed:border-neutral-300 aria-pressed:bg-neutral-100 aria-pressed:text-neutral-900 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:aria-pressed:border-neutral-600 dark:aria-pressed:bg-neutral-800 dark:aria-pressed:text-neutral-100 ${FOCUS}"
+  >
+    ${contextIcon(on)} Context
+  </button>`;
+}
+
+/**
  * The context switch's icon: three histogram bars, with this feature's
  * orange rule beside them while context is showing.
  */
-export function contextIcon(on: boolean) {
+function contextIcon(on: boolean) {
   return html`<svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" class="block">
     <rect x="1" y="7" width="2.5" height="6" rx="0.5" fill="currentColor" />
     <rect x="4.75" y="3" width="2.5" height="10" rx="0.5" fill="currentColor" />

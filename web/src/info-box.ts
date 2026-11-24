@@ -1,12 +1,22 @@
 import { html, nothing, type PropertyValues } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import type { FeatureCollection } from "geojson";
 
 import { LightElement } from "./lit-base";
 import { formatArea, formatLength, type FeatureSummary } from "./geo";
 import { featureText } from "./simplestyle";
 import { collectionStats, type KeyStats } from "./props";
-import { FOCUS, HAIRLINE, INK, MUTED, copiedFlag, copyFrom, ownProps } from "./prop-view";
+import { loadShowContext, saveShowContext } from "./inspector-prefs";
+import {
+  FOCUS,
+  HAIRLINE,
+  INK,
+  MUTED,
+  contextSwitch,
+  copiedFlag,
+  copyFrom,
+  ownProps,
+} from "./prop-view";
 import "./property-list";
 
 /** Property keys that commonly name a feature, in order of preference. */
@@ -23,6 +33,8 @@ export class InfoBox extends LightElement {
   @property({ attribute: false }) collection: FeatureCollection | null = null;
   /** The property the map is coloured by, if any. */
   @property({ attribute: false }) colorProp: string | null = null;
+  /** Whether the context boxes show; remembered between sessions. */
+  @state() private showContext = loadShowContext();
 
   // The feature shown before this one, for the pinned tiles' "was" lines.
   private previous: FeatureSummary | null = null;
@@ -55,22 +67,28 @@ export class InfoBox extends LightElement {
     this.dispatchEvent(new CustomEvent("close", { bubbles: true }));
   }
 
+  private toggleContext = () => {
+    this.showContext = !this.showContext;
+    saveShowContext(this.showContext);
+  };
+
   render() {
     const s = this.summary;
     if (!s) return nothing;
+    const total = this.collection?.features.length ?? 0;
     // Room for the context column only when there's a collection to compare
     // against. Full viewport height once the viewport is wide enough for the
     // box to clear the centred paste box (42rem, plus the box and its margin
     // on each side); shorter below that, so the two don't overlap.
     const size =
-      (this.collection?.features.length ?? 0) >= 2
+      total >= 2
         ? "w-[min(28rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-17rem)] min-[1600px]:max-h-[calc(100dvh-4.5rem)]"
         : "w-[min(24rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-17rem)] min-[1480px]:max-h-[calc(100dvh-4.5rem)]";
     return html`<section
       aria-label="Feature properties"
       class="pointer-events-auto flex ${size} flex-col overflow-hidden rounded-xl bg-white/95 shadow-xl backdrop-blur dark:bg-neutral-900/95"
     >
-      ${this.renderHeader(s)}
+      ${this.renderHeader(s, total)}
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <property-list
           class="block"
@@ -78,13 +96,14 @@ export class InfoBox extends LightElement {
           .previous=${this.previous}
           .stats=${this.collectionStats()}
           .colorProp=${this.colorProp}
+          .showContext=${this.showContext}
         ></property-list>
       </div>
       ${this.renderFooter(s)}
     </section>`;
   }
 
-  private renderHeader(s: FeatureSummary) {
+  private renderHeader(s: FeatureSummary, total: number) {
     const { title, description } = featureText(s.properties);
     const named =
       title ??
@@ -123,15 +142,18 @@ export class InfoBox extends LightElement {
               >${description}</p>`
             : nothing}
         </div>
-        <button
-          type="button"
-          @click=${this.close}
-          class="-mr-1.5 rounded-md px-2 py-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:hover:bg-neutral-700 dark:hover:text-neutral-200 ${FOCUS}"
-          title="Close (Esc)"
-          aria-label="Close"
-        >
-          ✕
-        </button>
+        <div class="-mr-1.5 flex shrink-0 items-center gap-1.5">
+          ${total >= 2 ? contextSwitch(this.showContext, total, this.toggleContext) : nothing}
+          <button
+            type="button"
+            @click=${this.close}
+            class="rounded-md px-2 py-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:hover:bg-neutral-700 dark:hover:text-neutral-200 ${FOCUS}"
+            title="Close (Esc)"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
       </div>
       <dl class="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[12px]">${measures}</dl>
       ${bbox
