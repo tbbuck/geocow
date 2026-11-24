@@ -55,6 +55,7 @@ import "./info-box";
 import "./settings-panel";
 import type { PasteStatus, PasteBox } from "./paste-box";
 import type { StyleState } from "./style-controls";
+import type { ColorByDetail } from "./property-list";
 import type { FeatureCollection } from "geojson";
 
 const SCHEME_KEY = "geocow:scheme";
@@ -89,6 +90,13 @@ export class GeocowApp extends LightElement {
 
   private currentFc: FeatureCollection | null = null;
   private toastTimer?: number;
+  private propKeys = new Set<string>();
+  private propKeysFor: FeatureCollection | null = null;
+  // Colour settings from before the inspector started colouring the map.
+  private colorBefore: Pick<
+    Settings,
+    "colorMode" | "colorProp" | "colorMin" | "colorMax"
+  > | null = null;
   // The `d=`/`s=` payload currently plotted, so a location change can tell
   // "new geometry" from "same geometry, different viewport".
   private loadedHashKey: string | null = null;
@@ -512,15 +520,55 @@ export class GeocowApp extends LightElement {
     if (await this.plot(text, true, notes)) this.pushPlotted();
   }
 
+  /**
+   * Settings resolved against the properties the loaded data carries. The
+   * key set is gathered once per collection: this runs on every render.
+   */
+  private effectiveSettings() {
+    if (this.propKeysFor !== this.currentFc) {
+      this.propKeys = new Set();
+      for (const f of this.currentFc?.features ?? []) {
+        for (const k of Object.keys(f.properties ?? {})) this.propKeys.add(k);
+      }
+      this.propKeysFor = this.currentFc;
+    }
+    return resolveSettings(this.settings, (p) => this.propKeys.has(p));
+  }
+
   /** Resolve settings against the loaded data's properties and push to the map. */
   private applySettings() {
-    const keys = new Set<string>();
-    if (this.currentFc) {
-      for (const f of this.currentFc.features) {
-        for (const k of Object.keys(f.properties ?? {})) keys.add(k);
-      }
+    this.map.setSettings(this.effectiveSettings());
+  }
+
+  /** The property the map is coloured by right now, or null. */
+  private coloredBy(): string | null {
+    const s = this.effectiveSettings();
+    return s.color ? s.colorProp : null;
+  }
+
+  /**
+   * The inspector asked to colour the map by a property, or to stop. The
+   * colour settings from before it first took over are kept, so stopping
+   * puts them back rather than switching colouring off outright.
+   */
+  private onColorBy(e: CustomEvent<ColorByDetail>) {
+    const { colorMode, colorProp, colorMin, colorMax } = this.settings;
+    let patch: Partial<Settings>;
+    if (e.detail) {
+      this.colorBefore ??= { colorMode, colorProp, colorMin, colorMax };
+      patch = {
+        colorMode: "on",
+        colorProp: e.detail.key,
+        colorMin: e.detail.min,
+        colorMax: e.detail.max,
+      };
+    } else {
+      patch = this.colorBefore ?? { colorMode: "off" };
+      this.colorBefore = null;
     }
-    this.map.setSettings(resolveSettings(this.settings, (p) => keys.has(p)));
+    this.settings = { ...this.settings, ...patch };
+    saveSettings(this.settings);
+    this.applySettings();
   }
 
   private onSettingsChange(e: CustomEvent<Settings>) {
@@ -644,7 +692,10 @@ export class GeocowApp extends LightElement {
         </div>
         <info-box
           .summary=${this.summary}
+          .collection=${this.currentFc}
+          .colorProp=${this.coloredBy()}
           @close=${this.closeInfo}
+          @color-by=${this.onColorBy}
         ></info-box>
       </div>
 
