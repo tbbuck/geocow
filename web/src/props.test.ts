@@ -164,18 +164,24 @@ describe("groupKeys", () => {
     ]);
   });
 
-  it("pulls in keys that start with a group's prefix, the bare prefix included", () => {
+  it("pulls in a key named just the prefix", () => {
     const groups = groupKeys(NGD);
-    expect(groups.find((g) => g.prefix === "oslandcover")?.keys).toEqual([
-      "oslandcover_capturemethod",
-      "oslandcover_updatedate",
-      "oslandcovertiera",
-      "oslandcovertierb",
-    ]);
     expect(groups.find((g) => g.prefix === "description")?.keys).toEqual([
       "description",
       "description_capturemethod",
       "description_updatedate",
+    ]);
+  });
+
+  it("keeps out keys that only begin with a prefix's letters", () => {
+    // Natural Earth's admin-0 fields: SUBUNIT is not an SU_ field.
+    expect(groupKeys(["SU_DIF", "SUBUNIT", "SU_A3", "SUBREGION"])).toEqual([
+      { prefix: null, keys: ["SUBUNIT", "SUBREGION"] },
+      { prefix: "SU", keys: ["SU_DIF", "SU_A3"] },
+    ]);
+    expect(groupKeys(NGD).find((g) => g.prefix === "oslandcover")?.keys).toEqual([
+      "oslandcover_capturemethod",
+      "oslandcover_updatedate",
     ]);
   });
 
@@ -189,7 +195,14 @@ describe("groupKeys", () => {
       "oslandcover",
       "_",
     ]);
-    expect(groups[0].keys).toEqual(["changetype", "osid", "toid", "versiondate"]);
+    expect(groups[0].keys).toEqual([
+      "changetype",
+      "osid",
+      "oslandcovertiera",
+      "oslandcovertierb",
+      "toid",
+      "versiondate",
+    ]);
     expect(groups[groups.length - 1].keys).toEqual(["_ingested_at", "_run_id"]);
   });
 
@@ -199,12 +212,22 @@ describe("groupKeys", () => {
     ]);
   });
 
-  it("joins the most specific group a key starts with", () => {
-    const groups = groupKeys(["os_a", "os_b", "osland_a", "osland_b", "oslandx"]);
-    expect(groups.find((g) => g.prefix === "osland")?.keys).toEqual([
-      "osland_a",
-      "osland_b",
-      "oslandx",
+  it("names a key's group by the text before its first separator", () => {
+    expect(groupKeys(["os_a", "os_b", "osland_a", "osland_b", "oslandx"])).toEqual([
+      { prefix: null, keys: ["oslandx"] },
+      { prefix: "os", keys: ["os_a", "os_b"] },
+      { prefix: "osland", keys: ["osland_a", "osland_b"] },
+    ]);
+  });
+
+  it("groups on colons too, as OpenStreetMap namespaces its tags", () => {
+    expect(groupKeys(["name", "addr:street", "addr:city", "roof:shape", "roof:levels"])).toEqual([
+      { prefix: null, keys: ["name"] },
+      { prefix: "addr", keys: ["addr:street", "addr:city"] },
+      { prefix: "roof", keys: ["roof:shape", "roof:levels"] },
+    ]);
+    expect(groupKeys(["addr_street", "addr:city"])).toEqual([
+      { prefix: "addr", keys: ["addr_street", "addr:city"] },
     ]);
   });
 
@@ -214,15 +237,21 @@ describe("groupKeys", () => {
 });
 
 describe("shortKey", () => {
-  it("drops the group prefix and the underscore after it", () => {
+  it("drops the group prefix and the separator after it", () => {
     expect(shortKey("height_relativemax_m", "height")).toBe("relativemax_m");
-    expect(shortKey("oslandcovertiera", "oslandcover")).toBe("tiera");
+    expect(shortKey("addr:street", "addr")).toBe("street");
     expect(shortKey("_run_id", "_")).toBe("run_id");
   });
 
-  it("keeps the key whole when ungrouped or equal to the prefix", () => {
+  it("drops a doubled separator whole", () => {
+    // ArcGIS Online's export names.
+    expect(shortKey("Shape__Area", "Shape")).toBe("Area");
+  });
+
+  it("keeps the key whole when ungrouped, equal to the prefix, or nothing would be left", () => {
     expect(shortKey("description", "description")).toBe("description");
     expect(shortKey("osid", null)).toBe("osid");
+    expect(shortKey("note_", "note")).toBe("note_");
   });
 });
 

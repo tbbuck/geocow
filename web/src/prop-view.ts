@@ -44,19 +44,20 @@ export function ownProps(props: Record<string, unknown>): Record<string, unknown
 }
 
 /**
- * A key, shortened under its group heading, that wraps at its underscores
- * rather than mid-word. Clicking copies the full key — the exact name the
- * Settings panel and SQL want.
+ * A key, shortened under its group heading, that wraps after its `_` and `:`
+ * separators rather than mid-word. Clicking copies the full key — the exact
+ * name the Settings panel and SQL want.
  */
 export function keyButton(key: string, prefix: string | null = null) {
-  const parts = shortKey(key, prefix).split("_");
+  // Each part keeps the separator it ends with.
+  const parts = shortKey(key, prefix).split(/(?<=[_:])/);
   return html`<button
     type="button"
     title=${`${key} (click to copy the key)`}
     class="group relative -mx-1 w-[calc(100%+0.5rem)] rounded px-1 text-left text-[12px] leading-[1.4] ${MUTED} [overflow-wrap:anywhere] hover:text-neutral-800 dark:hover:text-neutral-200 ${FOCUS}"
     @click=${(e: Event) => copyFrom(e.currentTarget as HTMLElement, key)}
   >
-    ${parts.map((p, i) => (i < parts.length - 1 ? html`${p}_<wbr />` : p))}${copiedFlag}
+    ${parts.map((p, i) => (i < parts.length - 1 ? html`${p}<wbr />` : p))}${copiedFlag}
   </button>`;
 }
 

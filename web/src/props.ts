@@ -110,18 +110,28 @@ export function matchesFilter(key: string, v: unknown, query: string): boolean {
 /** Keys that start with an underscore — conventionally system fields. */
 export const SYSTEM_PREFIX = "_";
 
+/** What ends a key's namespace: `height_max_m`, OpenStreetMap's `addr:street`. */
+const SEPARATOR = /[_:]/;
+const LEADING_SEPARATORS = /^[_:]+/;
+
 export interface KeyGroup {
   /** The shared prefix, `_` for underscore keys, null for ungrouped keys. */
   prefix: string | null;
   keys: string[];
 }
 
+/** The text before a key's first separator, or null when it has none. */
+function namespaceOf(key: string): string | null {
+  const i = key.search(SEPARATOR);
+  return i > 0 ? key.slice(0, i) : null;
+}
+
 /**
- * Group keys by the text before their first underscore, where two or more
- * keys share it. A key that merely starts with a group's prefix joins it too
- * (`oslandcovertiera` with `oslandcover_*`, `description` with
- * `description_*`), most specific group first. Ungrouped keys come first,
- * then the groups in order of appearance, then the underscore keys.
+ * Group keys by the text before their first `_` or `:`, where two or more
+ * keys share it. A key named just that joins its group too (`description`
+ * with `description_*`); one that only begins with the same letters doesn't
+ * (`SUBUNIT` stays out of `SU_*`). Ungrouped keys come first, then the
+ * groups in order of appearance, then the underscore keys.
  */
 export function groupKeys(keys: readonly string[]): KeyGroup[] {
   const system = keys.filter((k) => k.startsWith(SYSTEM_PREFIX));
@@ -129,18 +139,15 @@ export function groupKeys(keys: readonly string[]): KeyGroup[] {
 
   const counts = new Map<string, number>();
   for (const k of rest) {
-    const i = k.indexOf("_");
-    if (i > 0) counts.set(k.slice(0, i), (counts.get(k.slice(0, i)) ?? 0) + 1);
+    const ns = namespaceOf(k);
+    if (ns !== null) counts.set(ns, (counts.get(ns) ?? 0) + 1);
   }
-  const prefixes = [...counts]
-    .filter(([, n]) => n >= 2)
-    .map(([p]) => p)
-    .sort((a, b) => b.length - a.length);
+  const isGroup = (p: string | null): p is string => p !== null && (counts.get(p) ?? 0) >= 2;
 
   const loose: string[] = [];
   const groups = new Map<string, string[]>();
   for (const k of rest) {
-    const prefix = prefixes.find((p) => k.startsWith(p));
+    const prefix = [namespaceOf(k), k].find(isGroup);
     if (prefix === undefined) {
       loose.push(k);
       continue;
@@ -157,11 +164,11 @@ export function groupKeys(keys: readonly string[]): KeyGroup[] {
   return out;
 }
 
-/** A key as shown under its group heading: the prefix and its underscore dropped. */
+/** A key as shown under its group heading: the prefix and the separators after it dropped. */
 export function shortKey(key: string, prefix: string | null): string {
-  if (prefix === null || key === prefix) return key;
-  const rest = key.slice(prefix.length);
-  return rest.length > 1 && rest.startsWith("_") ? rest.slice(1) : rest;
+  if (prefix === null || key === prefix || !key.startsWith(prefix)) return key;
+  const rest = key.slice(prefix.length).replace(LEADING_SEPARATORS, "");
+  return rest === "" ? key : rest;
 }
 
 // --- Collection statistics --------------------------------------------------

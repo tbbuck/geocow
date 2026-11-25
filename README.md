@@ -171,7 +171,8 @@ MapLibre GL + Lit + Tailwind, served by `geocow serve`.
   where the stroke is off. A colour a feature sets beats colour-by.
 - **Click a feature** to focus it: the rest fades back, and a panel shows its
   type, vertex count, bounding box, approximate area/length and properties.
-  Properties group by shared key prefix and filter by key or value, and each
+  Properties group by shared key prefix (`height_*`, OpenStreetMap's
+  `addr:*`) and filter by key or value, and each
   is set against the whole collection — a histogram or share bar, with what
   stands out listed first (the Context switch hides all that). Pin the ones
   you care about to keep them on top, with what they were on the feature you
