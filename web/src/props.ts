@@ -23,6 +23,8 @@ const TIME_RE =
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const URL_RE = /^https?:\/\/\S+$/i;
 const NUMERIC_RE = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+// A leading zero before another digit marks a code ("004", "06037"), not a quantity.
+const ZERO_PADDED_RE = /^[+-]?0\d/;
 
 /** What a property value is, for choosing how to show it. */
 export function kindOf(v: unknown): ValueKind {
@@ -204,13 +206,19 @@ export interface KeyStats {
   constant: boolean;
   /** No feature has a value. */
   allEmpty: boolean;
-  /** Distribution of numbers (or numeric strings), when values vary. */
+  /**
+   * Distribution of numbers (or numeric strings), when values vary — but
+   * not zero-padded codes, or whole numbers under an id's name.
+   */
   numeric: Distribution | null;
   /** Distribution of ISO dates, when values vary. */
   temporal: Distribution | null;
   /** Value → count, most common first, for text keys with few, repeated values. */
   categories: Array<[string, number]> | null;
-  /** Unspaced strings, nearly all distinct: ids rather than descriptions. */
+  /**
+   * Unspaced strings, or whole numbers under an id's name, nearly all
+   * distinct: ids rather than descriptions or quantities.
+   */
   identifier: boolean;
   /** Value → count for every value (by its copy text). */
   counts: Map<string, number>;
@@ -221,9 +229,22 @@ interface Accumulator {
   numbers: number[];
   times: number[];
   allNumeric: boolean;
+  allWhole: boolean;
   allTemporal: boolean;
   allUnspacedText: boolean;
   counts: Map<string, number>;
+}
+
+// What GIS tools and publishers call a numeric identifier field.
+const ID_NAMES = new Set(["id", "fid", "gid", "oid", "objectid", "ogc_fid", "uprn", "usrn"]);
+
+/**
+ * Does a key name an identifier — `FID`, `OBJECTID`, `osm_id`, `parentId`,
+ * `uprn` — rather than a quantity? Words that merely end in "id" (`paid`,
+ * `valid`, `grid`) don't.
+ */
+export function idNamed(key: string): boolean {
+  return ID_NAMES.has(key.toLowerCase()) || /[_:.-]id$/i.test(key) || /[a-z](?:Id|ID)$/.test(key);
 }
 
 /** Per-key statistics over every feature's properties. */
@@ -239,6 +260,7 @@ export function collectionStats(features: readonly Feature[]): Map<string, KeySt
           numbers: [],
           times: [],
           allNumeric: true,
+          allWhole: true,
           allTemporal: true,
           allUnspacedText: true,
           counts: new Map(),
@@ -251,9 +273,19 @@ export function collectionStats(features: readonly Feature[]): Map<string, KeySt
       const text = copyText(v);
       a.counts.set(text, (a.counts.get(text) ?? 0) + 1);
 
-      const n = typeof v === "number" ? v : typeof v === "string" && NUMERIC_RE.test(v.trim()) ? Number(v) : NaN;
-      if (Number.isFinite(n)) a.numbers.push(n);
-      else a.allNumeric = false;
+      const s = typeof v === "string" ? v.trim() : "";
+      const n =
+        typeof v === "number"
+          ? v
+          : NUMERIC_RE.test(s) && !ZERO_PADDED_RE.test(s)
+            ? Number(s)
+            : NaN;
+      if (Number.isFinite(n)) {
+        a.numbers.push(n);
+        if (!Number.isInteger(n)) a.allWhole = false;
+      } else {
+        a.allNumeric = false;
+      }
 
       const t = kind === "date" || kind === "datetime" ? parseTime(v) : null;
       if (t !== null) a.times.push(t);
@@ -268,11 +300,14 @@ export function collectionStats(features: readonly Feature[]): Map<string, KeySt
   for (const [key, a] of acc) {
     const distinct = a.counts.size;
     const varies = distinct > 1;
-    const numeric = a.present > 0 && a.allNumeric && varies ? distribution(a.numbers) : null;
+    // Whole numbers under an id's name label features; they don't measure them.
+    const numericIds = a.present > 0 && a.allNumeric && a.allWhole && idNamed(key);
+    const numeric =
+      a.present > 0 && a.allNumeric && varies && !numericIds ? distribution(a.numbers) : null;
     const temporal =
       a.present > 0 && a.allTemporal && !numeric && varies ? distribution(a.times) : null;
     const identifier =
-      a.allUnspacedText &&
+      (a.allUnspacedText || numericIds) &&
       !numeric &&
       !temporal &&
       a.present >= 2 &&

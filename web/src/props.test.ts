@@ -8,6 +8,7 @@ import {
   copyText,
   displayValue,
   groupKeys,
+  idNamed,
   kindOf,
   matchesFilter,
   parseTime,
@@ -327,6 +328,89 @@ describe("collectionStats", () => {
   });
 });
 
+describe("idNamed", () => {
+  it("knows the names GIS tools and publishers give identifiers", () => {
+    for (const key of [
+      "id",
+      "ID",
+      "FID",
+      "gid",
+      "OBJECTID",
+      "ogc_fid",
+      "osm_id",
+      "NE_ID",
+      "ref:id",
+      "parentId",
+      "userID",
+      "uprn",
+      "USRN",
+    ]) {
+      expect(idNamed(key), key).toBe(true);
+    }
+  });
+
+  it("passes over words that merely end in id", () => {
+    for (const key of ["paid", "valid", "fluid", "grid", "GRID", "android", "humid"]) {
+      expect(idNamed(key), key).toBe(false);
+    }
+  });
+});
+
+describe("collectionStats on ids and codes", () => {
+  const of = (rows: Record<string, unknown>[]) => collectionStats(rows.map(feature));
+
+  it("reads whole numbers under an id's name as identifiers, not quantities", () => {
+    const stats = of(
+      Array.from({ length: 10 }, (_, i) => ({
+        FID: i + 1,
+        osm_id: String(4_000_000 + i * 31),
+        NE_ID: 1_159_320_319 + i * 17,
+      })),
+    );
+    for (const key of ["FID", "osm_id", "NE_ID"]) {
+      expect(stats.get(key)!.numeric, key).toBeNull();
+      expect(stats.get(key)!.identifier, key).toBe(true);
+    }
+  });
+
+  it("reads repeated whole numbers under an id's name as categories", () => {
+    const s = of([1, 1, 2, 2, 3, 3].map((region_id) => ({ region_id }))).get("region_id")!;
+    expect(s.numeric).toBeNull();
+    expect(s.identifier).toBe(false);
+    expect(s.categories).toEqual([
+      ["1", 2],
+      ["2", 2],
+      ["3", 2],
+    ]);
+  });
+
+  it("keeps distinct whole numbers under other names, and fractions under an id's, as quantities", () => {
+    const stats = of(
+      Array.from({ length: 10 }, (_, i) => ({ POP_EST: 40_000 * (i + 1) ** 3, paid: i * 10, grid_id: i + 0.5 })),
+    );
+    for (const key of ["POP_EST", "paid", "grid_id"]) {
+      expect(stats.get(key)!.numeric, key).not.toBeNull();
+    }
+  });
+
+  it("reads zero-padded numbers as codes, not quantities", () => {
+    const iso = of(["004", "008", "010", "012", "016", "-99"].map((ISO_N3) => ({ ISO_N3 }))).get(
+      "ISO_N3",
+    )!;
+    expect(iso.numeric).toBeNull();
+    expect(iso.identifier).toBe(true);
+    const fips = of(["06", "06", "48", "48", "36", "36"].map((STATEFP) => ({ STATEFP }))).get(
+      "STATEFP",
+    )!;
+    expect(fips.numeric).toBeNull();
+    expect(fips.categories).not.toBeNull();
+  });
+
+  it("still reads a lone zero and decimals below one as numbers", () => {
+    expect(of(["0", "0.5", "0.25", "12", "3"].map((v) => ({ v }))).get("v")!.numeric).not.toBeNull();
+  });
+});
+
 describe("binOf", () => {
   it("spreads a linear range over the bins, clamping the top value into the last", () => {
     const d = { min: 0, max: 16, log: false };
@@ -401,6 +485,18 @@ describe("standsOut", () => {
 
   it("keeps to the limit", () => {
     expect(standsOut(features[0].properties!, stats, 1)).toHaveLength(1);
+  });
+
+  it("doesn't call a feature's numeric id its highest value", () => {
+    const rows = Array.from({ length: 40 }, (_, i) => feature({ FID: i + 1, height_m: i % 7 }));
+    expect(standsOut(rows[39].properties!, collectionStats(rows))).toEqual([]);
+  });
+
+  it("flags a numeric id another feature shares", () => {
+    const rows = Array.from({ length: 40 }, (_, i) => feature({ FID: i === 1 ? 1 : i + 1 }));
+    expect(standsOut(rows[0].properties!, collectionStats(rows))).toEqual([
+      { key: "FID", note: "shared by 2 features" },
+    ]);
   });
 });
 
