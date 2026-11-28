@@ -116,20 +116,21 @@ fn serve_rejects_a_zero_share_limit_from_the_env() {
     );
 }
 
-#[test]
+/// Start `geocow serve` on an ephemeral port with `envs`, wait until it is
+/// listening (or has died), then stop it. Returns whether it got that far,
+/// and its stderr for the failure message.
 #[cfg(feature = "serve")]
-fn serve_starts_with_a_blank_share_limit_from_the_env() {
-    // compose.yaml passes "" for anything left out of .env; that must mean
-    // "the default", not a parse error that stops the server.
+fn serve_until_listening(envs: &[(&str, &std::ffi::OsStr)]) -> (bool, String) {
     use std::io::{BufRead, BufReader};
-    let mut child = geocow_bin()
-        .args(["serve", "--bind", "127.0.0.1:0"])
-        .env("GEOCOW_MAX_SHARE_BYTES", "")
+    let mut cmd = geocow_bin();
+    cmd.args(["serve", "--bind", "127.0.0.1:0"])
         .env("RUST_LOG", "geocow=info")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .stderr(Stdio::piped());
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().unwrap();
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let listening = stdout
         .lines()
@@ -137,11 +138,54 @@ fn serve_starts_with_a_blank_share_limit_from_the_env() {
         .any(|line| line.contains("listening"));
     child.kill().ok();
     let output = child.wait_with_output().unwrap();
-    assert!(
+    (
         listening,
-        "server should start; stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+#[test]
+#[cfg(feature = "serve")]
+fn serve_starts_with_blank_share_settings_from_the_env() {
+    // compose.yaml passes "" for anything left out of .env; that must mean
+    // "the default", not a parse error that stops the server.
+    let blank = std::ffi::OsStr::new("");
+    // The blank share dir means a temp one; the kill below skips its cleanup,
+    // so give it a TMPDIR of our own to remove.
+    let tmp = std::env::temp_dir().join(format!("geocow-cli-tmp-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let (listening, stderr) = serve_until_listening(&[
+        ("GEOCOW_MAX_SHARE_BYTES", blank),
+        ("GEOCOW_SHARE_DIR", blank),
+        ("TMPDIR", tmp.as_os_str()),
+    ]);
+    let made_one = std::fs::read_dir(&tmp).unwrap().count() == 1;
+    std::fs::remove_dir_all(&tmp).unwrap();
+    assert!(listening, "server should start; stderr:\n{stderr}");
+    assert!(
+        made_one,
+        "a blank GEOCOW_SHARE_DIR should mean a temp directory"
     );
+}
+
+#[test]
+#[cfg(feature = "serve")]
+fn serve_wipes_old_shares_from_the_share_dir_on_startup() {
+    let dir = std::env::temp_dir().join(format!("geocow-cli-shares-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stale = dir.join("6f9619ff-8b86-4011-b42d-00c04fc964ff");
+    std::fs::write(&stale, "from a previous run").unwrap();
+    let keep = dir.join("README");
+    std::fs::write(&keep, "not a share").unwrap();
+
+    let (listening, stderr) = serve_until_listening(&[("GEOCOW_SHARE_DIR", dir.as_os_str())]);
+    assert!(listening, "server should start; stderr:\n{stderr}");
+    assert!(
+        !stale.exists(),
+        "a share from a previous run should be wiped"
+    );
+    assert!(keep.exists(), "files that aren't shares must be left alone");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // ---------------------------------------------------------------

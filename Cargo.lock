@@ -519,6 +519,7 @@ dependencies = [
  "flate2",
  "geo",
  "geojson",
+ "http-body",
  "http-body-util",
  "proj",
  "serde",

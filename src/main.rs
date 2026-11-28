@@ -44,6 +44,11 @@ enum Commands {
             value_parser = parse_share_limit
         )]
         max_share_bytes: usize,
+        /// Directory for share payloads; any left by a previous run are
+        /// deleted at startup. Default: a private temp directory, removed on
+        /// exit. Give each server its own
+        #[arg(long, env = "GEOCOW_SHARE_DIR")]
+        share_dir: Option<std::ffi::OsString>,
     },
 
     /// Open WKT or GeoJSON (a file, or stdin) on a geocow map in the browser
@@ -101,6 +106,7 @@ fn main() -> Result<()> {
             bind,
             web_dir,
             max_share_bytes,
+            share_dir,
         }) => {
             tracing_subscriber::fmt()
                 .with_env_filter(
@@ -109,9 +115,20 @@ fn main() -> Result<()> {
                 )
                 .init();
             tracing::info!("OSTN15 grid validated");
+            // Blank counts as unset, as compose passes "" for anything left
+            // out of .env.
+            let store = match share_dir.filter(|d| !d.is_empty()) {
+                Some(dir) => {
+                    let dir = std::path::PathBuf::from(dir);
+                    geocow::share::ShareStore::open(&dir, max_share_bytes)
+                        .with_context(|| format!("cannot use share directory {}", dir.display()))?
+                }
+                None => geocow::share::ShareStore::temporary(max_share_bytes)
+                    .context("cannot create a temporary share directory")?,
+            };
             tokio::runtime::Runtime::new()
                 .context("failed to start the async runtime")?
-                .block_on(geocow::web::serve(bind, web_dir, max_share_bytes))
+                .block_on(geocow::web::serve(bind, web_dir, store))
                 .with_context(|| format!("server on {bind} failed"))?;
         }
 

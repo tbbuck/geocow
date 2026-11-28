@@ -24,7 +24,11 @@ services:
       GEOCOW_AERIAL_TILE_URL: ${GEOCOW_AERIAL_TILE_URL:-}       # hi-res aerial overlay (XYZ)
       GEOCOW_AERIAL_ATTRIBUTION: ${GEOCOW_AERIAL_ATTRIBUTION:-}
       GEOCOW_MAX_SHARE_BYTES: ${GEOCOW_MAX_SHARE_BYTES:-}       # per-share bytes; unset → 10 MiB
-    # The OSTN15 grid is baked into the image (see Dockerfile) — no volume.
+    # The OSTN15 grid is baked into the image (see Dockerfile). The volume
+    # only keeps share payloads off the container's copy-on-write layer; geocow
+    # wipes it at startup, so nothing in it outlives a restart.
+    volumes:
+      - shares:/shares
 
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8787/api/health"]
@@ -32,3 +36,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+volumes:
+  shares:

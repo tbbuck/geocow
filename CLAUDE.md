@@ -60,9 +60,9 @@ src/
   geom.rs        geometry type wrappers
   io.rs          WKT / GeoJSON / NDJSON parsing and writing, CRS detection
   wkb.rs         WKB / EWKB reader (hand-rolled, no dependency)
-  web.rs         axum API router, MapConfig + /api/config, `serve`   (feature: serve)
+  web.rs         axum API router, MapConfig + /api/config, ApiLimits, `serve` (feature: serve)
   ingest.rs      authenticated POST /api/geometry                    (feature: serve)
-  share.rs       bounded in-memory share store                       (feature: serve)
+  share.rs       bounded on-disk share store, wiped at startup       (feature: serve)
   launch.rs      `map`: build the share URL, open a browser          (feature: map)
   sharelink.rs   gzip+base64url share-payload codec                  (features: serve, map)
 tests/           integration tests (CLI + HTTP API)
@@ -92,7 +92,7 @@ In use today:
 | `anyhow` | CLI-level error handling |
 | `axum`, `tokio`, `tower-http`, `serde`, `tracing`, `uuid` | Web server (feature: `serve`) |
 | `flate2`, `base64` | Share-payload codec (features: `serve`, `map`) |
-| `tower`, `http-body-util` | HTTP test harness (dev-dependencies) |
+| `tower`, `http-body`, `http-body-util` | HTTP test harness (dev-dependencies) |
 
 Not yet pulled in — add them when the work actually lands, not before:
 `criterion` (benchmarks), `rayon` (parallel batch ops), `proptest` (property tests).

@@ -45,9 +45,11 @@ COPY --from=web /web/dist ./web/dist
 COPY OSTN15_NTv2/OSTN15_NTv2_OSGBtoETRS.gsb OSTN15_NTv2/LICENCE.md /grids/
 COPY LICENSE /usr/share/doc/geocow/LICENSE
 
+# Shares live in /shares (a volume in compose.yaml) and are wiped at startup.
 ENV GEOCOW_WEB_DIR=/app/web/dist \
     GEOCOW_GRID_DIR=/grids \
-    GEOCOW_BIND=0.0.0.0:8787
+    GEOCOW_BIND=0.0.0.0:8787 \
+    GEOCOW_SHARE_DIR=/shares
 
 # Map tiles and ingest are configured at run time, never baked in:
 #   GEOCOW_MAPTILER_KEY, GEOCOW_AERIAL_TILE_URL, GEOCOW_AERIAL_ATTRIBUTION,

@@ -182,7 +182,7 @@ MapLibre GL + Lit + Tailwind, served by `geocow serve`.
   ([configuration](#configuration)).
 - **Share links.** The viewport lives in the URL hash and Share packs the
   geometry in beside it. Past a URL-length threshold it falls back to a short
-  link backed by a small in-memory store (last 10 payloads, gone on restart —
+  link backed by a small on-disk store (last 10 payloads, wiped on restart —
   deliberately ephemeral).
 - **The URL is live.** Paste another geocow link over the current one and the
   map follows; back and forward step through plots and shares. Camera moves
@@ -275,7 +275,8 @@ flags (see `geocow <command> --help`).
 | `GEOCOW_AERIAL_ATTRIBUTION` | unset | `serve` |
 | `GEOCOW_API_KEY` | unset → `POST /api/geometry` disabled | `serve` |
 | `GEOCOW_PUBLIC_URL` | unset → derived from `Host` / `X-Forwarded-Proto` | `serve` |
-| `GEOCOW_MAX_SHARE_BYTES` | `10485760` (10 MiB) per gzipped share payload; the 10 newest are kept in memory | `serve` |
+| `GEOCOW_MAX_SHARE_BYTES` | `10485760` (10 MiB) per gzipped share payload; the 10 newest are kept on disk | `serve` |
+| `GEOCOW_SHARE_DIR` | unset → a private temp directory, removed on exit. If set, share files from a previous run are deleted at startup (nothing else in it is touched); give each server its own | `serve` |
 | `GEOCOW_URL` | `https://geocow.uk` | `map` |
 | `GEOCOW_BROWSER` | the system default | `map` |
 | `RUST_LOG` | `geocow=info,tower_http=debug` (a line per request) | `serve` |
@@ -352,7 +353,7 @@ src/
   error.rs       GeocowError
   web.rs         axum router, /api/config, `serve`        (feature: serve)
   ingest.rs      POST /api/geometry                       (feature: serve)
-  share.rs       bounded in-memory share store            (feature: serve)
+  share.rs       bounded on-disk share store              (feature: serve)
   launch.rs      `map`: build the URL, open a browser     (feature: map)
   sharelink.rs   gzip + base64url share-payload codec     (features: serve, map)
 tests/           CLI and HTTP integration tests

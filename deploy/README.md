@@ -27,7 +27,16 @@ to `compose.yaml` (gitignored) or export them before `docker compose up`:
 | `GEOCOW_AERIAL_ATTRIBUTION` | Attribution shown for that overlay. |
 | `GEOCOW_API_KEY` | Enables `POST /api/geometry` with this shared key. Unset: the endpoint answers 503. |
 | `GEOCOW_PUBLIC_URL` | Origin used in links returned by `/api/geometry`. Unset: derived from `Host` and `X-Forwarded-Proto`. |
-| `GEOCOW_MAX_SHARE_BYTES` | Largest share payload (gzipped) accepted by `/api/share` and `/api/geometry`, in bytes. Unset: 10485760 (10 MiB). The store keeps the 10 newest, so memory is bounded at ten times this. Past 25 MB, raise `client_max_body_size` in the proxy too. |
+| `GEOCOW_MAX_SHARE_BYTES` | Largest share payload (gzipped) accepted by `/api/share` and `/api/geometry`, in bytes. Unset: 10485760 (10 MiB). The store keeps the 10 newest on disk, so it holds at most ten times this. Past 25 MB, raise `client_max_body_size` in the proxy too. |
+
+Shares are files in the `shares` volume (`GEOCOW_SHARE_DIR=/shares` in the
+image), wiped whenever the container starts: share links never outlive a
+restart.
+
+Requests that carry a body (geometry, shares, ingest) run at most three at a
+time; the rest queue. Every API request is cut off with a 408 after 120 s,
+queueing included. nginx's own `proxy_read_timeout` (60 s by default) applies
+first when it's in front.
 
 ## Put a proxy in front
 

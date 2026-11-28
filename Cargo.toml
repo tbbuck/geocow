@@ -25,8 +25,8 @@ wkt = { version = "0.14", features = ["geo-types"] }
 
 # `geocow serve`: web server
 axum = { version = "0.8", optional = true }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"], optional = true }
-tower-http = { version = "0.7", features = ["fs", "trace"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "sync"], optional = true }
+tower-http = { version = "0.7", features = ["fs", "trace", "timeout"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 tracing = { version = "0.1", optional = true }
@@ -39,7 +39,9 @@ base64 = { version = "0.23", optional = true }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+http-body = "1"
 http-body-util = "0.1"
+tokio = { version = "1", features = ["time"] }
 
 [features]
 # Both subcommands by default; `--no-default-features` builds a lean

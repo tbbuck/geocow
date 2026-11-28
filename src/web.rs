@@ -6,15 +6,20 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Query},
+    extract::{DefaultBodyLimit, Query, Request, State},
     http::StatusCode,
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::Semaphore;
+use tower_http::timeout::TimeoutLayer;
 
 use crate::io;
 
@@ -298,25 +303,62 @@ impl MapConfig {
     }
 }
 
+/// Guards on how much work the API takes on at once.
+#[derive(Clone, Debug)]
+pub struct ApiLimits {
+    /// Requests that carry a body (geometry, shares, ingest) allowed to run
+    /// at once; the rest wait their turn. Each can hold up to
+    /// [`MAX_UPLOAD_BYTES`] in memory, so this is what bounds the server's
+    /// memory, not the per-request limit alone. Reads never wait on it.
+    pub max_concurrent_uploads: usize,
+    /// Ceiling on any API request, time spent queueing for an upload slot
+    /// included; past it the client gets a 408. It ends a stalled or trickled
+    /// upload. It can't interrupt parsing that's already running, which
+    /// doesn't yield to the timer.
+    pub request_timeout: Duration,
+}
+
+impl Default for ApiLimits {
+    fn default() -> Self {
+        Self {
+            max_concurrent_uploads: 3,
+            request_timeout: Duration::from_secs(120),
+        }
+    }
+}
+
+/// Hold one upload slot for the life of the request. Waiting happens inside
+/// the request (not in `poll_ready`, as tower's limiter does), so time in
+/// the queue counts against the request timeout.
+async fn upload_slot(State(slots): State<Arc<Semaphore>>, req: Request, next: Next) -> Response {
+    let Ok(_slot) = slots.acquire().await else {
+        // Only if the semaphore were closed, which nothing does.
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    next.run(req).await
+}
+
 /// Build the API router (no static-file serving), taking its settings from
-/// the environment and the default share limit. See [`api_router_with`] for
-/// the injectable form.
-pub fn api_router() -> Router {
-    api_router_with(
+/// the environment, with default limits and shares in a private temp
+/// directory. See [`api_router_with`] for the injectable form.
+pub fn api_router() -> Result<Router, crate::error::GeocowError> {
+    Ok(api_router_with(
         crate::ingest::IngestConfig::from_env(),
         MapConfig::from_env(),
-        crate::share::DEFAULT_MAX_SHARE_BYTES,
-    )
+        crate::share::ShareStore::temporary(crate::share::DEFAULT_MAX_SHARE_BYTES)?,
+        ApiLimits::default(),
+    ))
 }
 
 /// Build the API router with explicit settings — the ingest key, the public
 /// origin baked into returned URLs, the basemap config served at
-/// `/api/config`, and the per-payload share limit. Tests use this to avoid
-/// depending on (or racing on) process environment.
+/// `/api/config`, the share store, and the concurrency and time limits.
+/// Tests use this to avoid depending on (or racing on) process environment.
 pub fn api_router_with(
     ingest: crate::ingest::IngestConfig,
     map: MapConfig,
-    max_share_bytes: usize,
+    store: crate::share::ShareStore,
+    limits: ApiLimits,
 ) -> Router {
     // Every route that takes geometry gets the raised limit: the raw-body
     // upload routes carry whole datasets, and a single pasted geometry
@@ -331,14 +373,24 @@ pub fn api_router_with(
 
     // One store, two writers: the browser's Share button and POST
     // /api/geometry both put payloads where GET /api/share/{id} can find them.
-    let store = crate::share::ShareStore::new(max_share_bytes);
+    // All three upload routers draw on the same pool of slots.
+    let slots = Arc::new(Semaphore::new(limits.max_concurrent_uploads));
+    let uploads = Router::new()
+        .merge(geometry)
+        .merge(crate::ingest::ingest_router(ingest, store.clone()))
+        .merge(crate::share::share_upload_router(store.clone()))
+        .layer(middleware::from_fn_with_state(slots, upload_slot));
 
     Router::new()
         .route("/api/health", get(health_handler))
         .route("/api/config", get(move || async move { Json(map) }))
-        .merge(geometry)
-        .merge(crate::ingest::ingest_router(ingest, store.clone()))
-        .merge(crate::share::share_router(store))
+        .merge(uploads)
+        .merge(crate::share::share_read_router(store))
+        // Outermost, so it times the queue for a slot as well as the work.
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            limits.request_timeout,
+        ))
 }
 
 /// Log filter used when `RUST_LOG` is unset. `tower_http` is at debug because
@@ -346,14 +398,14 @@ pub fn api_router_with(
 pub const DEFAULT_LOG_FILTER: &str = "geocow=info,tower_http=debug";
 
 /// Serve the API and the built frontend in `web_dir` on `addr` until Ctrl-C
-/// or SIGTERM, accepting share payloads of up to `max_share_bytes`. Other
-/// settings come from the environment (see [`MapConfig`] and
-/// [`crate::ingest::IngestConfig`]). The caller is responsible for the grid
-/// gate and for installing a tracing subscriber.
+/// or SIGTERM, keeping shares in `store`. Other settings come from the
+/// environment (see [`MapConfig`] and [`crate::ingest::IngestConfig`]). The
+/// caller is responsible for the grid gate and for installing a tracing
+/// subscriber.
 pub async fn serve(
     addr: SocketAddr,
     web_dir: PathBuf,
-    max_share_bytes: usize,
+    store: crate::share::ShareStore,
 ) -> Result<(), crate::error::GeocowError> {
     use tower_http::services::{ServeDir, ServeFile};
     use tower_http::trace::TraceLayer;
@@ -379,7 +431,12 @@ pub async fn serve(
     // Serve the SPA: unknown paths fall back to index.html so client-side
     // routing / hash state survives a hard refresh.
     let static_files = ServeDir::new(&web_dir).not_found_service(ServeFile::new(index));
-    let app = api_router_with(ingest, map, max_share_bytes)
+    tracing::info!(
+        "shares go in {:?}, at most {} bytes each",
+        store.dir(),
+        store.max_bytes()
+    );
+    let app = api_router_with(ingest, map, store, ApiLimits::default())
         .fallback_service(static_files)
         .layer(TraceLayer::new_for_http());
 

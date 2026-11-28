@@ -306,7 +306,10 @@ async fn ingest_handler(
         );
     }
 
-    let id = state.store.insert(Bytes::from(payload));
+    let id = match state.store.insert(Bytes::from(payload)).await {
+        Ok(id) => id,
+        Err(e) => return geocow_error(e),
+    };
     let url = sharelink::share_id_url(&origin, &id);
 
     Json(IngestResponse {

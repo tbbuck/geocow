@@ -9,11 +9,17 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::Value;
+use std::time::Duration;
 use tower::ServiceExt; // for `oneshot`
+
+/// A share store in its own private temp directory, removed with the router.
+fn test_store() -> geocow::share::ShareStore {
+    geocow::share::ShareStore::temporary(geocow::share::DEFAULT_MAX_SHARE_BYTES).unwrap()
+}
 
 /// POST `{"input": input}` to a JSON paste route.
 async fn post_json(uri: &str, input: &str) -> (StatusCode, Value) {
-    let app = geocow::web::api_router();
+    let app = geocow::web::api_router().unwrap();
     let body = serde_json::json!({ "input": input }).to_string();
     let req = Request::builder()
         .method("POST")
@@ -52,7 +58,7 @@ fn big_multipoint(n: usize, x0: f64, y0: f64) -> String {
 
 #[tokio::test]
 async fn health_returns_ok() {
-    let app = geocow::web::api_router();
+    let app = geocow::web::api_router().unwrap();
     let req = Request::builder()
         .uri("/api/health")
         .body(Body::empty())
@@ -70,7 +76,8 @@ async fn get_config(map: geocow::web::MapConfig) -> Value {
             public_url: None,
         },
         map,
-        geocow::share::DEFAULT_MAX_SHARE_BYTES,
+        test_store(),
+        geocow::web::ApiLimits::default(),
     );
     let req = Request::builder()
         .uri("/api/config")
@@ -228,7 +235,7 @@ async fn transform_27700_point_to_4258() {
 
 /// POST a raw text body (no JSON envelope) to a file-upload route.
 async fn post_raw(uri: &str, body: String) -> (StatusCode, Value) {
-    let app = geocow::web::api_router();
+    let app = geocow::web::api_router().unwrap();
     let req = Request::builder()
         .method("POST")
         .uri(uri)
@@ -383,7 +390,7 @@ async fn get_share(app: &Router, id: &str) -> (StatusCode, Vec<u8>) {
 
 #[tokio::test]
 async fn share_roundtrips_the_payload() {
-    let app = geocow::web::api_router();
+    let app = geocow::web::api_router().unwrap();
     let payload = "gzipped-share-blob-\u{1f42e}"; // opaque bytes, incl. non-ascii
     let id = post_share(&app, payload).await;
     let (status, body) = get_share(&app, &id).await;
@@ -393,14 +400,14 @@ async fn share_roundtrips_the_payload() {
 
 #[tokio::test]
 async fn share_unknown_id_returns_404() {
-    let app = geocow::web::api_router();
+    let app = geocow::web::api_router().unwrap();
     let (status, _) = get_share(&app, "00000000-0000-0000-0000-000000000000").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn share_empty_body_returns_422() {
-    let app = geocow::web::api_router();
+    let app = geocow::web::api_router().unwrap();
     let req = Request::builder()
         .method("POST")
         .uri("/api/share")
@@ -419,7 +426,8 @@ fn share_limited_app(max_share_bytes: usize) -> Router {
             public_url: Some(TEST_ORIGIN.into()),
         },
         geocow::web::MapConfig::default(),
-        max_share_bytes,
+        geocow::share::ShareStore::temporary(max_share_bytes).unwrap(),
+        geocow::web::ApiLimits::default(),
     )
 }
 
@@ -460,9 +468,167 @@ async fn geometry_over_the_configured_share_limit_is_refused() {
 }
 
 #[tokio::test]
+async fn share_ids_that_are_not_uuids_never_reach_the_filesystem() {
+    let app = geocow::web::api_router().unwrap();
+    for id in ["..%2F..%2Fetc%2Fpasswd", "..", "not-a-uuid"] {
+        let (status, _) = get_share(&app, id).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{id}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Upload concurrency and timeouts
+// ---------------------------------------------------------------------------
+
+/// A request body that never arrives: the client sent headers, then went
+/// quiet — a slow or hostile upload sitting on its slot.
+struct StalledBody;
+
+impl http_body::Body for StalledBody {
+    type Data = axum::body::Bytes;
+    type Error = std::convert::Infallible;
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        std::task::Poll::Pending
+    }
+}
+
+fn limited_app(max_concurrent_uploads: usize, request_timeout: Duration) -> Router {
+    geocow::web::api_router_with(
+        geocow::ingest::IngestConfig {
+            api_key: Some(TEST_KEY.into()),
+            public_url: Some(TEST_ORIGIN.into()),
+        },
+        geocow::web::MapConfig::default(),
+        test_store(),
+        geocow::web::ApiLimits {
+            max_concurrent_uploads,
+            request_timeout,
+        },
+    )
+}
+
+fn post_request(uri: &str, body: Body) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "text/plain")
+        .body(body)
+        .unwrap()
+}
+
+/// Start a stalled upload in the background and give it time to take a slot.
+async fn hold_a_slot(app: &Router) -> tokio::task::JoinHandle<()> {
+    let app = app.clone();
+    let task = tokio::spawn(async move {
+        let _ = app
+            .oneshot(post_request("/api/share", Body::new(StalledBody)))
+            .await;
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    task
+}
+
+/// Long enough that only a request stuck in the queue could take this long.
+const PATIENCE: Duration = Duration::from_millis(300);
+
+#[tokio::test]
+async fn a_stalled_upload_times_out() {
+    let app = limited_app(3, Duration::from_millis(200));
+    let resp = app
+        .oneshot(post_request("/api/share", Body::new(StalledBody)))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::REQUEST_TIMEOUT);
+}
+
+#[tokio::test]
+async fn uploads_past_the_limit_wait_for_a_free_slot() {
+    let app = limited_app(1, Duration::from_secs(30));
+    let holder = hold_a_slot(&app).await;
+    let queued = tokio::time::timeout(
+        PATIENCE,
+        app.clone()
+            .oneshot(post_request("/api/share", Body::from("payload"))),
+    )
+    .await;
+    assert!(queued.is_err(), "the second upload should be queued");
+
+    // The slot comes back when its request goes away.
+    holder.abort();
+    let _ = holder.await;
+    let resp = tokio::time::timeout(
+        PATIENCE,
+        app.oneshot(post_request("/api/share", Body::from("payload"))),
+    )
+    .await
+    .expect("a freed slot should be taken straight away")
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn uploads_within_the_limit_run_alongside_each_other() {
+    let app = limited_app(2, Duration::from_secs(30));
+    let holder = hold_a_slot(&app).await;
+    let resp = tokio::time::timeout(
+        PATIENCE,
+        app.oneshot(post_request("/api/share", Body::from("payload"))),
+    )
+    .await
+    .expect("a second slot is free")
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    holder.abort();
+}
+
+#[tokio::test]
+async fn the_upload_limit_is_shared_by_every_upload_route() {
+    let app = limited_app(1, Duration::from_secs(30));
+    let holder = hold_a_slot(&app).await;
+    for (uri, body) in [
+        ("/api/parse-file", "POINT(1 52)"),
+        ("/api/transform-file", "POINT(1 52)"),
+        ("/api/geometry", "POINT(1 52)"),
+    ] {
+        let mut req = post_request(uri, Body::from(body));
+        req.headers_mut()
+            .insert("x-api-key", TEST_KEY.parse().unwrap());
+        let queued = tokio::time::timeout(PATIENCE, app.clone().oneshot(req)).await;
+        assert!(
+            queued.is_err(),
+            "{uri} should queue behind the stalled share"
+        );
+    }
+    holder.abort();
+}
+
+#[tokio::test]
+async fn reads_are_not_held_up_by_uploads() {
+    let app = limited_app(1, Duration::from_secs(30));
+    let holder = hold_a_slot(&app).await;
+    let id = "00000000-0000-0000-0000-000000000000";
+    for (uri, expected) in [
+        ("/api/health", StatusCode::OK),
+        ("/api/config", StatusCode::OK),
+        (&*format!("/api/share/{id}"), StatusCode::NOT_FOUND),
+    ] {
+        let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+        let resp = tokio::time::timeout(PATIENCE, app.clone().oneshot(req))
+            .await
+            .unwrap_or_else(|_| panic!("{uri} should not queue behind an upload"))
+            .unwrap();
+        assert_eq!(resp.status(), expected, "{uri}");
+    }
+    holder.abort();
+}
+
+#[tokio::test]
 async fn share_evicts_oldest_past_capacity() {
     // Capacity is 10; the 11th share must push the first out.
-    let app = geocow::web::api_router();
+    let app = geocow::web::api_router().unwrap();
     let mut ids = Vec::new();
     for i in 0..11 {
         ids.push(post_share(&app, &format!("payload-{i}")).await);
@@ -494,7 +660,8 @@ fn ingest_app() -> Router {
             public_url: Some(TEST_ORIGIN.into()),
         },
         geocow::web::MapConfig::default(),
-        geocow::share::DEFAULT_MAX_SHARE_BYTES,
+        test_store(),
+        geocow::web::ApiLimits::default(),
     )
 }
 
@@ -507,7 +674,8 @@ fn host_derived_app() -> Router {
             public_url: None,
         },
         geocow::web::MapConfig::default(),
-        geocow::share::DEFAULT_MAX_SHARE_BYTES,
+        test_store(),
+        geocow::web::ApiLimits::default(),
     )
 }
 
@@ -519,7 +687,8 @@ fn keyless_app() -> Router {
             public_url: Some(TEST_ORIGIN.into()),
         },
         geocow::web::MapConfig::default(),
-        geocow::share::DEFAULT_MAX_SHARE_BYTES,
+        test_store(),
+        geocow::web::ApiLimits::default(),
     )
 }
 
@@ -958,7 +1127,7 @@ async fn geometry_rejects_an_empty_body() {
 #[tokio::test]
 async fn share_rejects_payload_over_the_limit() {
     // One byte past the 10 MB ceiling must be rejected by the body limit.
-    let app = geocow::web::api_router();
+    let app = geocow::web::api_router().unwrap();
     let big = vec![b'a'; 10 * 1024 * 1024 + 1];
     let req = Request::builder()
         .method("POST")
