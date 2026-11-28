@@ -27,6 +27,7 @@ to `compose.yaml` (gitignored) or export them before `docker compose up`:
 | `GEOCOW_AERIAL_ATTRIBUTION` | Attribution shown for that overlay. |
 | `GEOCOW_API_KEY` | Enables `POST /api/geometry` with this shared key. Unset: the endpoint answers 503. |
 | `GEOCOW_PUBLIC_URL` | Origin used in links returned by `/api/geometry`. Unset: derived from `Host` and `X-Forwarded-Proto`. |
+| `GEOCOW_MAX_SHARE_BYTES` | Largest share payload (gzipped) accepted by `/api/share` and `/api/geometry`, in bytes. Unset: 10485760 (10 MiB). The store keeps the 10 newest, so memory is bounded at ten times this. Past 25 MB, raise `client_max_body_size` in the proxy too. |
 
 ## Put a proxy in front
 

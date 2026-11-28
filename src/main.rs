@@ -34,6 +34,15 @@ enum Commands {
         /// Directory holding the built frontend
         #[arg(long, env = "GEOCOW_WEB_DIR", default_value = "web/dist")]
         web_dir: std::path::PathBuf,
+        /// Largest share payload accepted, in bytes (gzipped). Up to 10 are
+        /// held in memory at once, so this also bounds the store's footprint
+        #[arg(
+            long,
+            env = "GEOCOW_MAX_SHARE_BYTES",
+            default_value_t = std::num::NonZeroUsize::new(geocow::share::DEFAULT_MAX_SHARE_BYTES)
+                .expect("the default share limit is non-zero")
+        )]
+        max_share_bytes: std::num::NonZeroUsize,
     },
 
     /// Open WKT or GeoJSON (a file, or stdin) on a geocow map in the browser
@@ -87,7 +96,11 @@ fn main() -> Result<()> {
         }
 
         #[cfg(feature = "serve")]
-        Some(Commands::Serve { bind, web_dir }) => {
+        Some(Commands::Serve {
+            bind,
+            web_dir,
+            max_share_bytes,
+        }) => {
             tracing_subscriber::fmt()
                 .with_env_filter(
                     tracing_subscriber::EnvFilter::try_from_default_env()
@@ -97,7 +110,7 @@ fn main() -> Result<()> {
             tracing::info!("OSTN15 grid validated");
             tokio::runtime::Runtime::new()
                 .context("failed to start the async runtime")?
-                .block_on(geocow::web::serve(bind, web_dir))
+                .block_on(geocow::web::serve(bind, web_dir, max_share_bytes.get()))
                 .with_context(|| format!("server on {bind} failed"))?;
         }
 

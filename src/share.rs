@@ -1,10 +1,11 @@
 //! In-memory temporary share store for the web tool.
 //!
-//! Holds at most [`CAPACITY`] recently-shared payloads, each at most
-//! [`MAX_SHARE_BYTES`]. Inserting past capacity evicts the oldest entry, so the
-//! footprint is hard-bounded at `CAPACITY * MAX_SHARE_BYTES` with no
-//! persistence, cleanup job, or database to maintain — that bound is the whole
-//! defence against unbounded growth / abuse.
+//! Holds at most [`CAPACITY`] recently-shared payloads, each at most the
+//! store's `max_bytes` ([`DEFAULT_MAX_SHARE_BYTES`] unless `serve` is given
+//! `--max-share-bytes` / `GEOCOW_MAX_SHARE_BYTES`). Inserting past capacity
+//! evicts the oldest entry, so the footprint is hard-bounded at
+//! `CAPACITY * max_bytes` with no persistence, cleanup job, or database to
+//! maintain — that bound is the whole defence against unbounded growth / abuse.
 //!
 //! Links are deliberately ephemeral: they vanish on server restart and once
 //! `CAPACITY` newer links displace them. That is the intended contract, not a
@@ -27,21 +28,37 @@ use uuid::Uuid;
 /// Most-recent shared payloads kept at once; the oldest is evicted past this.
 pub const CAPACITY: usize = 10;
 
-/// Per-payload ceiling. The frontend stores a gzipped payload, so 10 MB is a
-/// very large dataset; the raised body limit rejects anything bigger up front.
-pub const MAX_SHARE_BYTES: usize = 10 * 1024 * 1024;
+/// Default per-payload ceiling. The frontend stores a gzipped payload, so
+/// 10 MB is a very large dataset; the body limit rejects anything bigger up
+/// front.
+pub const DEFAULT_MAX_SHARE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Thread-safe bounded ring buffer of `(id, payload)`, newest at the back.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ShareStore {
     inner: Arc<Mutex<VecDeque<(String, Bytes)>>>,
+    max_bytes: usize,
+}
+
+impl Default for ShareStore {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_SHARE_BYTES)
+    }
 }
 
 impl ShareStore {
-    pub fn new() -> Self {
+    /// An empty store accepting payloads of at most `max_bytes` each.
+    pub fn new(max_bytes: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(VecDeque::with_capacity(CAPACITY))),
+            max_bytes,
         }
+    }
+
+    /// Per-payload ceiling. Every writer checks against this one value, so the
+    /// browser's Share button and `/api/geometry` can't disagree.
+    pub fn max_bytes(&self) -> usize {
+        self.max_bytes
     }
 
     /// Lock the buffer, recovering the guard if a previous holder panicked —
@@ -86,7 +103,7 @@ async fn create_share(State(store): State<ShareStore>, body: Bytes) -> Response 
     }
     // The body limit below already rejects oversize requests; this is a belt to
     // that braces in case the layer is ever reconfigured.
-    if body.len() > MAX_SHARE_BYTES {
+    if body.len() > store.max_bytes() {
         return (StatusCode::PAYLOAD_TOO_LARGE, "payload too large").into_response();
     }
     let id = store.insert(body);
@@ -109,7 +126,7 @@ pub fn share_router(store: ShareStore) -> Router {
     Router::new()
         .route("/api/share", post(create_share))
         .route("/api/share/{id}", get(read_share))
-        .layer(DefaultBodyLimit::max(MAX_SHARE_BYTES))
+        .layer(DefaultBodyLimit::max(store.max_bytes()))
         .with_state(store)
 }
 
@@ -119,7 +136,7 @@ mod tests {
 
     #[test]
     fn insert_returns_distinct_ids_and_get_roundtrips() {
-        let store = ShareStore::new();
+        let store = ShareStore::default();
         let a = store.insert(Bytes::from_static(b"alpha"));
         let b = store.insert(Bytes::from_static(b"beta"));
         assert_ne!(a, b);
@@ -130,7 +147,7 @@ mod tests {
 
     #[test]
     fn insert_past_capacity_evicts_oldest() {
-        let store = ShareStore::new();
+        let store = ShareStore::default();
         let ids: Vec<String> = (0..CAPACITY + 1)
             .map(|i| store.insert(Bytes::from(format!("p{i}"))))
             .collect();

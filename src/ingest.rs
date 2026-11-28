@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::GeocowError;
 use crate::io;
-use crate::share::{MAX_SHARE_BYTES, ShareStore};
+use crate::share::ShareStore;
 use crate::sharelink;
 use crate::wkb;
 
@@ -295,11 +295,12 @@ async fn ingest_handler(
         Ok(p) => p,
         Err(e) => return geocow_error(e),
     };
-    if payload.len() > MAX_SHARE_BYTES {
+    let limit = state.store.max_bytes();
+    if payload.len() > limit {
         return error(
             StatusCode::PAYLOAD_TOO_LARGE,
             format!(
-                "geometry is too large to share ({} bytes compressed, limit {MAX_SHARE_BYTES})",
+                "geometry is too large to share ({} bytes compressed, limit {limit})",
                 payload.len()
             ),
         );

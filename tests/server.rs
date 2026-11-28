@@ -70,6 +70,7 @@ async fn get_config(map: geocow::web::MapConfig) -> Value {
             public_url: None,
         },
         map,
+        geocow::share::DEFAULT_MAX_SHARE_BYTES,
     );
     let req = Request::builder()
         .uri("/api/config")
@@ -410,6 +411,54 @@ async fn share_empty_body_returns_422() {
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
+/// A router whose share store holds payloads of at most `max_share_bytes`.
+fn share_limited_app(max_share_bytes: usize) -> Router {
+    geocow::web::api_router_with(
+        geocow::ingest::IngestConfig {
+            api_key: Some(TEST_KEY.into()),
+            public_url: Some(TEST_ORIGIN.into()),
+        },
+        geocow::web::MapConfig::default(),
+        max_share_bytes,
+    )
+}
+
+#[tokio::test]
+async fn share_limit_is_configurable() {
+    let app = share_limited_app(16);
+    // Exactly at the limit is fine…
+    let id = post_share(&app, &"a".repeat(16)).await;
+    assert_eq!(get_share(&app, &id).await.0, StatusCode::OK);
+    // …one byte over is refused.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/share")
+        .header("content-type", "text/plain")
+        .body(Body::from("a".repeat(17)))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn geometry_over_the_configured_share_limit_is_refused() {
+    // The share payload is gzipped, so the body must compress past the limit:
+    // a tiny limit does that for any real geometry.
+    let app = share_limited_app(16);
+    let (status, json) = post_geometry(
+        &app,
+        "",
+        Some(("x-api-key", TEST_KEY)),
+        "LINESTRING(-1.5 52.4, -1.6 52.5, -1.7 52.6)",
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(
+        json["error"].as_str().unwrap().contains("limit 16"),
+        "error should state the configured limit: {json}"
+    );
+}
+
 #[tokio::test]
 async fn share_evicts_oldest_past_capacity() {
     // Capacity is 10; the 11th share must push the first out.
@@ -445,6 +494,7 @@ fn ingest_app() -> Router {
             public_url: Some(TEST_ORIGIN.into()),
         },
         geocow::web::MapConfig::default(),
+        geocow::share::DEFAULT_MAX_SHARE_BYTES,
     )
 }
 
@@ -457,6 +507,7 @@ fn host_derived_app() -> Router {
             public_url: None,
         },
         geocow::web::MapConfig::default(),
+        geocow::share::DEFAULT_MAX_SHARE_BYTES,
     )
 }
 
@@ -468,6 +519,7 @@ fn keyless_app() -> Router {
             public_url: Some(TEST_ORIGIN.into()),
         },
         geocow::web::MapConfig::default(),
+        geocow::share::DEFAULT_MAX_SHARE_BYTES,
     )
 }
 

@@ -275,6 +275,7 @@ flags (see `geocow <command> --help`).
 | `GEOCOW_AERIAL_ATTRIBUTION` | unset | `serve` |
 | `GEOCOW_API_KEY` | unset → `POST /api/geometry` disabled | `serve` |
 | `GEOCOW_PUBLIC_URL` | unset → derived from `Host` / `X-Forwarded-Proto` | `serve` |
+| `GEOCOW_MAX_SHARE_BYTES` | `10485760` (10 MiB) per gzipped share payload; the 10 newest are kept in memory | `serve` |
 | `GEOCOW_URL` | `https://geocow.uk` | `map` |
 | `GEOCOW_BROWSER` | the system default | `map` |
 | `RUST_LOG` | `geocow=info,tower_http=debug` (a line per request) | `serve` |

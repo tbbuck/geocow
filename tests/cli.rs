@@ -85,6 +85,38 @@ fn help_lists_every_subcommand() {
 }
 
 // ---------------------------------------------------------------
+// serve — options
+// ---------------------------------------------------------------
+
+#[test]
+#[cfg(feature = "serve")]
+fn serve_help_documents_the_share_limit_env_var() {
+    let output = geocow_bin().args(["serve", "--help"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--max-share-bytes") && stdout.contains("GEOCOW_MAX_SHARE_BYTES"),
+        "serve --help should document the share limit:\n{stdout}"
+    );
+}
+
+#[test]
+#[cfg(feature = "serve")]
+fn serve_rejects_a_zero_share_limit_from_the_env() {
+    // Refused at argument parsing, before anything binds a port.
+    let output = geocow_bin()
+        .arg("serve")
+        .env("GEOCOW_MAX_SHARE_BYTES", "0")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("max-share-bytes"),
+        "error should name the bad option:\n{stderr}"
+    );
+}
+
+// ---------------------------------------------------------------
 // map — open geometry on a geocow map
 // ---------------------------------------------------------------
 

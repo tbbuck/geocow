@@ -299,19 +299,25 @@ impl MapConfig {
 }
 
 /// Build the API router (no static-file serving), taking its settings from
-/// the environment. See [`api_router_with`] for the injectable form.
+/// the environment and the default share limit. See [`api_router_with`] for
+/// the injectable form.
 pub fn api_router() -> Router {
     api_router_with(
         crate::ingest::IngestConfig::from_env(),
         MapConfig::from_env(),
+        crate::share::DEFAULT_MAX_SHARE_BYTES,
     )
 }
 
 /// Build the API router with explicit settings — the ingest key, the public
-/// origin baked into returned URLs, and the basemap config served at
-/// `/api/config`. Tests use this to avoid depending on (or racing on) process
-/// environment.
-pub fn api_router_with(ingest: crate::ingest::IngestConfig, map: MapConfig) -> Router {
+/// origin baked into returned URLs, the basemap config served at
+/// `/api/config`, and the per-payload share limit. Tests use this to avoid
+/// depending on (or racing on) process environment.
+pub fn api_router_with(
+    ingest: crate::ingest::IngestConfig,
+    map: MapConfig,
+    max_share_bytes: usize,
+) -> Router {
     // Every route that takes geometry gets the raised limit: the raw-body
     // upload routes carry whole datasets, and a single pasted geometry
     // (a big MultiPolygon, one FeatureCollection) goes through the JSON
@@ -325,7 +331,7 @@ pub fn api_router_with(ingest: crate::ingest::IngestConfig, map: MapConfig) -> R
 
     // One store, two writers: the browser's Share button and POST
     // /api/geometry both put payloads where GET /api/share/{id} can find them.
-    let store = crate::share::ShareStore::new();
+    let store = crate::share::ShareStore::new(max_share_bytes);
 
     Router::new()
         .route("/api/health", get(health_handler))
@@ -340,10 +346,15 @@ pub fn api_router_with(ingest: crate::ingest::IngestConfig, map: MapConfig) -> R
 pub const DEFAULT_LOG_FILTER: &str = "geocow=info,tower_http=debug";
 
 /// Serve the API and the built frontend in `web_dir` on `addr` until Ctrl-C
-/// or SIGTERM. Settings come from the environment (see [`MapConfig`] and
+/// or SIGTERM, accepting share payloads of up to `max_share_bytes`. Other
+/// settings come from the environment (see [`MapConfig`] and
 /// [`crate::ingest::IngestConfig`]). The caller is responsible for the grid
 /// gate and for installing a tracing subscriber.
-pub async fn serve(addr: SocketAddr, web_dir: PathBuf) -> Result<(), crate::error::GeocowError> {
+pub async fn serve(
+    addr: SocketAddr,
+    web_dir: PathBuf,
+    max_share_bytes: usize,
+) -> Result<(), crate::error::GeocowError> {
     use tower_http::services::{ServeDir, ServeFile};
     use tower_http::trace::TraceLayer;
 
@@ -368,7 +379,7 @@ pub async fn serve(addr: SocketAddr, web_dir: PathBuf) -> Result<(), crate::erro
     // Serve the SPA: unknown paths fall back to index.html so client-side
     // routing / hash state survives a hard refresh.
     let static_files = ServeDir::new(&web_dir).not_found_service(ServeFile::new(index));
-    let app = api_router_with(ingest, map)
+    let app = api_router_with(ingest, map, max_share_bytes)
         .fallback_service(static_files)
         .layer(TraceLayer::new_for_http());
 
