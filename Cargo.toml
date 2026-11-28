@@ -21,7 +21,7 @@ geojson = "1.0"
 # (Debian trixie) ships 9.6.0, which would force a from-source PROJ build.
 proj = "0.28"
 thiserror = "2"
-wkt = { version = "0.14", features = ["geo-types"] }
+wkt = { version = "0.15", features = ["geo-types"] }
 
 # `geocow serve`: web server
 axum = { version = "0.8", optional = true }
