@@ -34,15 +34,16 @@ enum Commands {
         /// Directory holding the built frontend
         #[arg(long, env = "GEOCOW_WEB_DIR", default_value = "web/dist")]
         web_dir: std::path::PathBuf,
-        /// Largest share payload accepted, in bytes (gzipped). Up to 10 are
-        /// held in memory at once, so this also bounds the store's footprint
+        /// Largest share payload accepted, in bytes (gzipped); empty means the
+        /// default. Up to 10 are held in memory at once, so this also bounds
+        /// the store's footprint
         #[arg(
             long,
             env = "GEOCOW_MAX_SHARE_BYTES",
-            default_value_t = std::num::NonZeroUsize::new(geocow::share::DEFAULT_MAX_SHARE_BYTES)
-                .expect("the default share limit is non-zero")
+            default_value_t = geocow::share::DEFAULT_MAX_SHARE_BYTES,
+            value_parser = parse_share_limit
         )]
-        max_share_bytes: std::num::NonZeroUsize,
+        max_share_bytes: usize,
     },
 
     /// Open WKT or GeoJSON (a file, or stdin) on a geocow map in the browser
@@ -110,7 +111,7 @@ fn main() -> Result<()> {
             tracing::info!("OSTN15 grid validated");
             tokio::runtime::Runtime::new()
                 .context("failed to start the async runtime")?
-                .block_on(geocow::web::serve(bind, web_dir, max_share_bytes.get()))
+                .block_on(geocow::web::serve(bind, web_dir, max_share_bytes))
                 .with_context(|| format!("server on {bind} failed"))?;
         }
 
@@ -139,6 +140,44 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Parse `--max-share-bytes` / `GEOCOW_MAX_SHARE_BYTES`. Blank counts as
+/// unset, like the other `GEOCOW_*` settings, since compose passes "" for
+/// anything left out of `.env`; zero would make sharing impossible, so it's
+/// refused rather than taken literally.
+#[cfg(feature = "serve")]
+fn parse_share_limit(s: &str) -> Result<usize, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(geocow::share::DEFAULT_MAX_SHARE_BYTES);
+    }
+    match s.parse::<usize>() {
+        Ok(0) => Err("must be at least 1 byte".into()),
+        Ok(n) => Ok(n),
+        Err(_) => Err("expected a whole number of bytes, e.g. 10485760".into()),
+    }
+}
+
+#[cfg(all(test, feature = "serve"))]
+mod tests {
+    use super::*;
+    use geocow::share::DEFAULT_MAX_SHARE_BYTES;
+
+    #[test]
+    fn an_empty_share_limit_means_the_default() {
+        // compose.yaml passes "" for anything left out of .env.
+        assert_eq!(parse_share_limit(""), Ok(DEFAULT_MAX_SHARE_BYTES));
+        assert_eq!(parse_share_limit("  "), Ok(DEFAULT_MAX_SHARE_BYTES));
+    }
+
+    #[test]
+    fn a_share_limit_is_a_positive_byte_count() {
+        assert_eq!(parse_share_limit("20971520"), Ok(20_971_520));
+        assert!(parse_share_limit("0").is_err());
+        assert!(parse_share_limit("-1").is_err());
+        assert!(parse_share_limit("ten").is_err());
+    }
 }
 
 fn read_stdin() -> Result<String> {

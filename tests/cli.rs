@@ -116,6 +116,34 @@ fn serve_rejects_a_zero_share_limit_from_the_env() {
     );
 }
 
+#[test]
+#[cfg(feature = "serve")]
+fn serve_starts_with_a_blank_share_limit_from_the_env() {
+    // compose.yaml passes "" for anything left out of .env; that must mean
+    // "the default", not a parse error that stops the server.
+    use std::io::{BufRead, BufReader};
+    let mut child = geocow_bin()
+        .args(["serve", "--bind", "127.0.0.1:0"])
+        .env("GEOCOW_MAX_SHARE_BYTES", "")
+        .env("RUST_LOG", "geocow=info")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let listening = stdout
+        .lines()
+        .map_while(Result::ok)
+        .any(|line| line.contains("listening"));
+    child.kill().ok();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        listening,
+        "server should start; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // ---------------------------------------------------------------
 // map — open geometry on a geocow map
 // ---------------------------------------------------------------
